@@ -57,4 +57,14 @@ public class QueryLog {
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
+
+    /** Identity hash of the row; a row with an existing key is never processed again. */
+    @Column(length = 64)
+    private String rowKey;
+
+    /** Number of loads this row appeared in (1 = loaded once). */
+    private int seenCount = 1;
+
+    private LocalDateTime lastSeenAt;
+    private Long lastSeenBatchId;
 }

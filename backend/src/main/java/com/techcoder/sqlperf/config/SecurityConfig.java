@@ -25,7 +25,7 @@ public class SecurityConfig {
 
         if (props.security().mode() == SptProperties.SecurityMode.JWT) {
             http.authorizeHttpRequests(auth -> auth
-                            .requestMatchers("/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+                            .requestMatchers("/actuator/health/**", "/v3/api-docs/**", "/swagger-ui/**", "/api/ui-config").permitAll()
                             .anyRequest().authenticated())
                     .oauth2ResourceServer(o -> o.jwt(Customizer.withDefaults()));
         } else {

@@ -2,25 +2,14 @@
   <div class="page-header">
     <div>
       <h1>Tuning Tracker</h1>
-      <div class="subtitle">{{ total() }} work items · group metrics are live from the query groups · drag headers to reorder</div>
+      <div class="subtitle">{{ total() }} work items · group metrics are live from the query groups · drag headers to reorder · right-click to copy</div>
     </div>
     <span class="spacer"></span>
-    <button mat-stroked-button [matMenuTriggerFor]="colMenu"><mat-icon>view_column</mat-icon> Columns</button>
-    <button mat-stroked-button (click)="exportXlsx()"><mat-icon>download</mat-icon> Export Excel</button>
+    <button mat-stroked-button (click)="openColumns()"><mat-icon>view_column</mat-icon> Columns</button>
+    <button mat-stroked-button (click)="resetLayout()" matTooltip="Restore default column order, widths and visibility"><mat-icon>restart_alt</mat-icon> Reset layout</button>
+    <button mat-stroked-button (click)="exportXlsx()" matTooltip="All rows matching the filter, including custom columns"><mat-icon>download</mat-icon> Export Excel</button>
     <a mat-flat-button routerLink="/groups"><mat-icon>playlist_add</mat-icon> Add from groups</a>
   </div>
-
-  <mat-menu #colMenu="matMenu" class="col-menu">
-    <div class="col-menu-actions" (click)="$event.stopPropagation()">
-      <button mat-button (click)="showColumns('default')">Reset layout</button>
-      <button mat-button (click)="showColumns('all')">Show all</button>
-    </div>
-    @for (c of chooser(); track c.key) {
-      <div class="col-item" (click)="$event.stopPropagation()">
-        <mat-checkbox [checked]="c.visible" (change)="toggleColumn(c.key, $event.checked)">{{ c.label }}</mat-checkbox>
-      </div>
-    }
-  </mat-menu>
 
   <div class="panel">
     <form class="filters" (ngSubmit)="search()">

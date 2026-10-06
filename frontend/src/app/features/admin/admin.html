@@ -157,6 +157,16 @@
       </div>
     </mat-tab>
 
+    <mat-tab label="Loaded files">
+      <div class="tab-body">
+        <p class="muted">
+          Every distinct file content (SHA-256) and how many times it was uploaded. An identical file is never parsed twice:
+          the repeat import is flagged as a duplicate and its rows are only counted as seen again.
+        </p>
+        <ag-grid-angular class="grid batches" [gridOptions]="fileGrid" [columnDefs]="fileCols" [rowData]="files()" />
+      </div>
+    </mat-tab>
+
     <mat-tab label="Import history">
       <div class="tab-body">
         <ag-grid-angular class="grid batches" [gridOptions]="batchGrid" [columnDefs]="batchCols" [rowData]="batches()" />

@@ -4,10 +4,16 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 **Cloudera Impala**.
 
 - **Spring Boot 4.1.1** (Java 21) REST service – `backend/`
-- **Angular 22 + Angular Material 3 + AG Grid Community 36** UI with light / dark / system themes – `frontend/`
+- **Angular 22 + Angular Material 3 + AG Grid Enterprise 36** UI with light / dark / system themes – `frontend/`
 - **Oracle** (shared environments) and **SQLite** (local development) schemas managed by Flyway
-- See [docs/architecture.md](docs/architecture.md) for the workflow mapping, data model, fingerprint rules
-  and how to add columns.
+- Every log row is processed **once**: repeated loads (same file or overlapping exports) are recognised,
+  counted and kept in a load history, but never re-processed
+
+| Document | For |
+|---|---|
+| [User manual](docs/user-manual.md) | Engineers, SMEs and business users using the screens |
+| [Developer guide](docs/developer-guide.md) | Setup, code layout, migrations, ingestion design, AG Grid, deployment |
+| [Architecture](docs/architecture.md) | Workflow mapping, data model, fingerprint rules |
 
 ## Screens
 
@@ -19,12 +25,10 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 | Group detail | Metrics, sample + normalized SQL, log rows, diagnostics (explain / profile / exec summary), DDL, optimization runs, feedback |
 | Tuning Tracker | All tracking columns, column chooser, drag-to-reorder / resize / pin (layout remembered per user), filters, Excel export; edit page with change history and drill-down |
 
-All grids use **AG Grid Community** (MIT, no license key): server-side paging and sorting via the infinite
-row model, expandable group rows via full-width detail rows, and a theme bound to the app's light/dark
-tokens (`frontend/src/app/shared/grid.ts`). Excel export is produced by the API (Apache POI), so no AG Grid
-Enterprise license is needed. If you later license Enterprise, master/detail, the column tool panel and
-the server-side row model can replace the custom pieces.
-| Administration | Data sources, runtime custom columns, versioned prompt templates, import history |
+All grids use **AG Grid Enterprise**: server-side row model (server paging / sorting), master/detail for
+query groups, columns side bar and header menus, cell range selection with clipboard, and context-menu Excel
+export. The license key is read at runtime from `SPT_AG_GRID_LICENSE_KEY` (served by `/api/ui-config`), so it
+is never committed; without it the grids run in evaluation mode with a watermark.
 
 ## Run locally
 
@@ -42,12 +46,14 @@ npm start
 ```
 
 Open http://localhost:4200, go to **Query Logs → Import logs** and upload
-[`samples/query_log_sample.csv`](samples/query_log_sample.csv). API docs: http://localhost:8080/swagger-ui.html
+[`samples/query_log_sample.csv`](samples/query_log_sample.csv), then
+[`samples/query_log_sample_day2.csv`](samples/query_log_sample_day2.csv) (20 repeated + 15 new rows) to see
+de-duplication. API docs: http://localhost:8080/swagger-ui.html
 
 ### Tests
 
 ```bash
-cd backend && mvn test        # fingerprinting, profile parser, agent response parser, end-to-end ingestion on SQLite
+cd backend && mvn test        # fingerprinting, profile parser, agent response parser, end-to-end ingestion + de-duplication on SQLite
 cd frontend && npx ng test --watch=false
 ```
 
@@ -78,7 +84,9 @@ seq_id, executed_query, user_query, error_code, error_category, error_message, u
 
 Header matching ignores case / spaces / underscores and accepts aliases (`useris`, `user`, `sql`, `duration`, …).
 `duration_minutes` is derived from start / end time when empty. Rows without any SQL are rejected and
-reported on the import (status `COMPLETED_WITH_ERRORS`) without stopping the load.
+reported on the import (status `COMPLETED_WITH_ERRORS`) without stopping the load. Rows already loaded by an
+earlier import are counted as *already loaded* and skipped; an identical file is flagged as a duplicate and
+not parsed at all.
 
 ## Configuration (`spt.*`)
 
@@ -90,5 +98,7 @@ reported on the import (status `COMPLETED_WITH_ERRORS`) without stopping the loa
 | `spt.ingestion.batch-size` | `500` | Rows per insert transaction |
 | `spt.ingestion.max-rejected-rows` | `1000` | Abort an import after this many bad rows |
 | `spt.ingestion.jdbc-query-timeout-seconds` | `600` | Statement timeout for log pulls |
+| `spt.ingestion.row-identity` | `CONTENT` | What makes a row "already loaded" (`CONTENT` or `SEQ_ID`) |
+| `spt.ui.ag-grid-license-key` | `$SPT_AG_GRID_LICENSE_KEY` | AG Grid Enterprise license |
 | `spt.security.mode` | `NONE` | `JWT` turns on OAuth2 resource-server security |
 | `spt.cors.allowed-origins` | `http://localhost:4200` | UI origins |

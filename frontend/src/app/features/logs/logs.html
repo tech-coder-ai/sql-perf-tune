@@ -36,6 +36,7 @@
         <input matInput type="number" min="0" name="minDuration" [(ngModel)]="filter.minDuration" />
       </mat-form-field>
       <mat-checkbox name="errorsOnly" [(ngModel)]="filter.errorsOnly">Errors only</mat-checkbox>
+      <mat-checkbox name="reloadedOnly" [(ngModel)]="filter.reloadedOnly" matTooltip="Rows that appeared in more than one load">Re-loaded only</mat-checkbox>
       @if (filter.groupId) {
         <span class="muted">Group #{{ filter.groupId }}</span>
       }

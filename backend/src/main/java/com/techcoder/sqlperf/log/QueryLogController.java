@@ -1,7 +1,14 @@
 package com.techcoder.sqlperf.log;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import com.techcoder.sqlperf.ingestion.IngestionBatch;
+import com.techcoder.sqlperf.ingestion.IngestionBatchRepository;
 
 import com.techcoder.sqlperf.common.NotFoundException;
 import com.techcoder.sqlperf.common.PageResponse;
@@ -21,12 +28,35 @@ import org.springframework.web.bind.annotation.RestController;
 public class QueryLogController {
 
     private static final Set<String> SORTABLE = Set.of("seqId", "userId", "startTime", "endTime", "durationMinutes",
-            "errorCode", "errorCategory", "groupId", "batchId", "id");
+            "errorCode", "errorCategory", "groupId", "batchId", "id", "seenCount", "lastSeenAt", "createdAt");
 
     private final QueryLogRepository repo;
+    private final LogSightingRepository sightings;
+    private final IngestionBatchRepository batches;
 
-    public QueryLogController(QueryLogRepository repo) {
+    public QueryLogController(QueryLogRepository repo, LogSightingRepository sightings, IngestionBatchRepository batches) {
         this.repo = repo;
+        this.sightings = sightings;
+        this.batches = batches;
+    }
+
+    public record LoadHistoryEntry(Long batchId, LocalDateTime seenAt, boolean first, String sourceKind,
+                                   String sourceName, Long duplicateOfBatchId) {
+    }
+
+    /** Every load this row appeared in; only the first one processed it. */
+    @GetMapping("/{id}/history")
+    public List<LoadHistoryEntry> history(@PathVariable Long id) {
+        repo.findById(id).orElseThrow(() -> new NotFoundException("Query log", id));
+        List<LogSighting> list = sightings.findByLogIdOrderBySeenAtDescIdDesc(id);
+        Map<Long, IngestionBatch> byId = batches.findAllById(list.stream().map(LogSighting::getBatchId).toList())
+                .stream().collect(Collectors.toMap(IngestionBatch::getId, Function.identity()));
+        return list.stream().map(s -> {
+            IngestionBatch b = byId.get(s.getBatchId());
+            return new LoadHistoryEntry(s.getBatchId(), s.getSeenAt(), s.isFirst(),
+                    b == null ? null : b.getSourceKind().name(), b == null ? null : b.getSourceName(),
+                    b == null ? null : b.getDuplicateOfBatchId());
+        }).toList();
     }
 
     @GetMapping
@@ -42,6 +72,7 @@ public class QueryLogController {
             @RequestParam(required = false) Long batchId,
             @RequestParam(required = false) Double minDuration,
             @RequestParam(required = false) Boolean errorsOnly,
+            @RequestParam(required = false) Boolean reloadedOnly,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
         var spec = Specs.<QueryLog>all(
@@ -54,6 +85,7 @@ public class QueryLogController {
                 Specs.gte("durationMinutes", minDuration),
                 Specs.gte("startTime", from),
                 Specs.lte("startTime", to),
+                Boolean.TRUE.equals(reloadedOnly) ? (root, cq, cb) -> cb.greaterThan(root.get("seenCount"), 1) : null,
                 Boolean.TRUE.equals(errorsOnly)
                         ? (root, cq, cb) -> cb.or(cb.isNotNull(root.get("errorCode")), cb.isNotNull(root.get("errorCategory")))
                         : null);

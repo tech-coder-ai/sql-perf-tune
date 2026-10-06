@@ -86,7 +86,17 @@ import { StatusChip } from '../../shared/status-chip';
       @if (result(); as r) {
         <div class="result">
           <app-status [value]="r.status" />
-          <span>{{ r.rowsLoaded }} loaded · {{ r.rowsRejected }} rejected · {{ r.groupsAffected }} groups refreshed</span>
+          <span>
+            {{ r.rowsLoaded }} new · {{ r.rowsDuplicate }} already loaded (not re-processed) · {{ r.rowsRejected }} rejected ·
+            {{ r.groupsAffected }} groups refreshed
+          </span>
+          @if (r.duplicateOfBatchId) {
+            <div class="dup">
+              <mat-icon>content_copy</mat-icon>
+              This exact file was already loaded (import #{{ r.duplicateOfBatchId }}). This is load {{ r.fileLoadNumber }} of the file;
+              nothing was re-processed.
+            </div>
+          }
           @if (r.message) {
             <pre>{{ r.message }}</pre>
           }
@@ -115,6 +125,7 @@ import { StatusChip } from '../../shared/status-chip';
     .hint { font-size: 12px; }
     .full { width: 100%; }
     .result { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .dup { width: 100%; display: flex; gap: 8px; align-items: center; color: var(--spt-warn); }
     .result pre { width: 100%; max-height: 160px; overflow: auto; font-size: 12px; background: var(--spt-code-bg); padding: 8px; border-radius: 8px; }
   `,
 })

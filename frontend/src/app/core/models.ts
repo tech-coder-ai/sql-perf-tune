@@ -22,6 +22,33 @@ export interface QueryLog {
   sqlEngine: string;
   fingerprint: string | null;
   groupId: number | null;
+  createdAt: string;
+  rowKey: string | null;
+  /** number of loads that contained this row (processed only by the first) */
+  seenCount: number;
+  lastSeenAt: string | null;
+  lastSeenBatchId: number | null;
+}
+
+export interface LoadHistoryEntry {
+  batchId: number;
+  seenAt: string;
+  first: boolean;
+  sourceKind: string | null;
+  sourceName: string | null;
+  duplicateOfBatchId: number | null;
+}
+
+export interface SourceFile {
+  id: number;
+  contentHash: string;
+  fileName: string | null;
+  fileSize: number | null;
+  loadCount: number;
+  processedBatchId: number;
+  lastBatchId: number;
+  firstLoadedAt: string;
+  lastLoadedAt: string;
 }
 
 export interface QueryGroup {
@@ -125,7 +152,12 @@ export interface IngestionBatch {
   rowsRead: number;
   rowsLoaded: number;
   rowsRejected: number;
+  rowsDuplicate: number;
   groupsAffected: number;
+  contentHash: string | null;
+  sourceFileId: number | null;
+  fileLoadNumber: number | null;
+  duplicateOfBatchId: number | null;
   message: string | null;
   startedAt: string;
   completedAt: string | null;

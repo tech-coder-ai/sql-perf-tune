@@ -57,9 +57,14 @@ spt:
     batch-size: 500
     max-rejected-rows: 1000
     default-sql-engine: IMPALA
+    # CONTENT (seq_id + user + times + SQL text) or SEQ_ID (seq_id only) decides "already loaded"
+    row-identity: CONTENT
     jdbc-query-timeout-seconds: 600
   cors:
     allowed-origins: http://localhost:4200
+  ui:
+    # AG Grid Enterprise license; empty = evaluation mode (watermark). Never commit the key.
+    ag-grid-license-key: ${SPT_AG_GRID_LICENSE_KEY:}
 
 logging:
   level:

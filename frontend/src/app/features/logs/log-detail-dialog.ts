@@ -1,15 +1,17 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
-import { QueryLog } from '../../core/models';
+import { Api } from '../../core/api';
+import { LoadHistoryEntry, QueryLog } from '../../core/models';
+import { StatusChip } from '../../shared/status-chip';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
 import { SqlBlock } from '../../shared/sql-block';
 
 @Component({
   selector: 'app-log-detail-dialog',
-  imports: [MatDialogModule, MatButtonModule, MatIconModule, RouterLink, SqlBlock, MinutesPipe, TimestampPipe],
+  imports: [MatDialogModule, MatButtonModule, MatIconModule, RouterLink, SqlBlock, StatusChip, MinutesPipe, TimestampPipe],
   template: `
     <h2 mat-dialog-title>Log row · seq {{ log.seqId ?? log.id }}</h2>
     <mat-dialog-content>
@@ -20,7 +22,30 @@ import { SqlBlock } from '../../shared/sql-block';
         <div class="kv"><div class="k">Duration</div><div class="v">{{ log.durationMinutes | minutes }}</div></div>
         <div class="kv"><div class="k">Error</div><div class="v">{{ log.errorCode || '—' }} {{ log.errorCategory ? '· ' + log.errorCategory : '' }}</div></div>
         <div class="kv"><div class="k">Group</div><div class="v">{{ log.groupId ?? '—' }}</div></div>
+        <div class="kv"><div class="k">Loads</div><div class="v">{{ log.seenCount }}×</div></div>
+        <div class="kv"><div class="k">First loaded</div><div class="v">{{ log.createdAt | ts }}</div></div>
       </div>
+      <h3 class="section-title">Load history</h3>
+      <p class="muted">The row was processed (fingerprinted and grouped) only by its first load; later loads just recorded that it was seen again.</p>
+      <table class="history">
+        <tr><th>Import</th><th>Seen at</th><th>Source</th><th></th></tr>
+        @for (h of history(); track h.batchId) {
+          <tr>
+            <td>#{{ h.batchId }}</td>
+            <td>{{ h.seenAt | ts }}</td>
+            <td>{{ h.sourceKind }} · {{ h.sourceName }}</td>
+            <td>
+              @if (h.first) {
+                <app-status value="PROCESSED" />
+              } @else if (h.duplicateOfBatchId) {
+                <app-status value="DUPLICATE_FILE" /> <span class="muted">same file as #{{ h.duplicateOfBatchId }}</span>
+              } @else {
+                <app-status value="ALREADY_LOADED" /> <span class="muted">skipped</span>
+              }
+            </td>
+          </tr>
+        }
+      </table>
       @if (log.errorMessage) {
         <h3 class="section-title">Error message</h3>
         <app-sql-block [text]="log.errorMessage" maxHeight="140px" />
@@ -42,7 +67,17 @@ import { SqlBlock } from '../../shared/sql-block';
       <button mat-flat-button mat-dialog-close>Close</button>
     </mat-dialog-actions>
   `,
+  styles: `
+    .history { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .history th { text-align: left; color: var(--spt-muted); font-weight: 600; }
+    .history th, .history td { padding: 6px 8px; border-bottom: 1px solid var(--spt-border); }
+  `,
 })
 export class LogDetailDialog {
   readonly log = inject<QueryLog>(MAT_DIALOG_DATA);
+  readonly history = signal<LoadHistoryEntry[]>([]);
+
+  constructor() {
+    inject(Api).logHistory(this.log.id).subscribe((h) => this.history.set(h));
+  }
 }

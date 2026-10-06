@@ -2,7 +2,7 @@
   <div class="page-header">
     <div>
       <h1>Query Groups</h1>
-      <div class="subtitle">Same SQL with different WHERE filters, grouped by fingerprint. Click a row to see its log rows.</div>
+      <div class="subtitle">{{ total() }} groups · same SQL with different WHERE filters, grouped by fingerprint. Click a row to see its log rows.</div>
     </div>
     <span class="spacer"></span>
     <button mat-stroked-button (click)="rebuild()" matTooltip="Re-fingerprint all logs (after changing fingerprint settings)">
@@ -47,19 +47,9 @@
       class="grid"
       [gridOptions]="gridOptions"
       [columnDefs]="columns"
-      [rowData]="rows()"
       (gridReady)="onReady($event)"
       (rowClicked)="onRowClicked($event)"
-      (sortChanged)="onSort($event)"
       (selectionChanged)="onSelection()"
-    />
-    <mat-paginator
-      [length]="total()"
-      [pageIndex]="pageIndex"
-      [pageSize]="pageSize"
-      [pageSizeOptions]="[10, 25, 50, 100]"
-      (page)="onPage($event)"
-      showFirstLastButtons
     />
   </div>
 </div>

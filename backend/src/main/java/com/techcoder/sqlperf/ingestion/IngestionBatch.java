@@ -44,6 +44,8 @@ public class IngestionBatch {
     private int rowsRead;
     private int rowsLoaded;
     private int rowsRejected;
+    /** Rows already loaded before (or repeated within this load): recorded as sightings, not processed. */
+    private int rowsDuplicate;
     private int groupsAffected;
 
     @Column(length = 4000)
@@ -53,4 +55,13 @@ public class IngestionBatch {
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
     private String createdBy;
+
+    /** SHA-256 of the uploaded file (null for JDBC pulls). */
+    @Column(length = 64)
+    private String contentHash;
+    private Long sourceFileId;
+    /** Nth time this exact file content was loaded. */
+    private Integer fileLoadNumber;
+    /** Set when the identical file was already processed by that import; nothing was re-parsed. */
+    private Long duplicateOfBatchId;
 }

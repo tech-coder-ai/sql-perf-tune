@@ -9,11 +9,13 @@ import {
   DataSource,
   Feedback,
   IngestionBatch,
+  LoadHistoryEntry,
   OptimizationRun,
   Page,
   PromptTemplate,
   QueryGroup,
   QueryLog,
+  SourceFile,
   SqlDiagnostic,
   TableDdl,
   Tracker,
@@ -46,6 +48,9 @@ export class Api {
   log(id: number): Observable<QueryLog> {
     return this.http.get<QueryLog>(`/api/logs/${id}`);
   }
+  logHistory(id: number): Observable<LoadHistoryEntry[]> {
+    return this.http.get<LoadHistoryEntry[]>(`/api/logs/${id}/history`);
+  }
 
   // ----- ingestion
   upload(file: File, sqlEngine: string): Observable<IngestionBatch> {
@@ -58,6 +63,9 @@ export class Api {
   }
   batches(): Observable<IngestionBatch[]> {
     return this.http.get<IngestionBatch[]>('/api/ingestion/batches');
+  }
+  loadedFiles(): Observable<SourceFile[]> {
+    return this.http.get<SourceFile[]>('/api/ingestion/files');
   }
 
   // ----- groups

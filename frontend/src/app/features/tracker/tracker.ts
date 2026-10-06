@@ -1,11 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { MatMenuModule } from '@angular/material/menu';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router, RouterLink } from '@angular/router';
@@ -17,7 +15,7 @@ import { downloadBlob, loadPref, savePref } from '../../core/prefs';
 import {
   LinkCell,
   StatusCell,
-  baseGridOptions,
+  serverGridOptions,
   minutesFormatter,
   numCol,
   pagedDatasource,
@@ -39,10 +37,8 @@ const STATE_KEY = 'tracker.grid';
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
-    MatCheckboxModule,
     MatButtonModule,
     MatIconModule,
-    MatMenuModule,
     MatTooltipModule,
   ],
   templateUrl: './tracker.html',
@@ -56,20 +52,12 @@ export class TrackerList {
   readonly statuses = WORKFLOW_STATUSES;
   readonly priorities = PRIORITIES;
   readonly total = signal(0);
-  /** columns offered in the chooser (standard + active custom fields) */
-  readonly chooser = signal<{ key: string; label: string; visible: boolean }[]>([]);
   readonly columnDefs = signal<ColDef<Tracker>[]>([]);
 
   filter = { q: '', status: [] as string[], priority: '', theme: '', lead: '' };
 
   readonly gridOptions: GridOptions<Tracker> = {
-    ...baseGridOptions,
-    rowModelType: 'infinite',
-    pagination: true,
-    paginationPageSize: 25,
-    paginationPageSizeSelector: [25, 50, 100],
-    cacheBlockSize: 100,
-    maxBlocksInCache: 10,
+    ...serverGridOptions<Tracker>(25),
     onColumnMoved: () => this.saveState(),
     onColumnResized: (e) => e.finished && this.saveState(),
     onColumnVisible: () => this.saveState(),
@@ -113,7 +101,6 @@ export class TrackerList {
         }),
       ),
     ];
-    this.chooser.set(defs.filter((d) => d.colId !== 'trackerId').map((d) => ({ key: d.colId!, label: d.headerName!, visible: !d.hide })));
     return defs;
   }
 
@@ -173,7 +160,7 @@ export class TrackerList {
     this.grid = e.api;
     this.restoreState();
     e.api.setGridOption(
-      'datasource',
+      'serverSideDatasource',
       pagedDatasource(
         (page, size, sort) => this.api.trackers({ ...this.params(), page, size, sort }),
         this.sortMap,
@@ -184,7 +171,7 @@ export class TrackerList {
 
   search(): void {
     this.grid?.paginationGoToFirstPage();
-    this.grid?.purgeInfiniteCache();
+    this.grid?.refreshServerSide({ purge: true });
   }
 
   reset(): void {
@@ -192,31 +179,19 @@ export class TrackerList {
     this.search();
   }
 
-  // ---- column chooser & layout persistence
+  // ---- column layout (side bar "Columns" panel + header menus), remembered per user
 
-  toggleColumn(key: string, visible: boolean): void {
-    this.grid?.setColumnsVisible([key], visible);
-    this.syncChooser();
+  openColumns(): void {
+    this.grid?.openToolPanel('columns');
   }
 
-  showColumns(mode: 'all' | 'default'): void {
-    if (!this.grid) return;
-    if (mode === 'default') {
-      try {
-        localStorage.removeItem('spt.' + STATE_KEY);
-      } catch {
-        /* ignore */
-      }
-      this.grid.resetColumnState();
-    } else {
-      this.grid.setColumnsVisible(this.chooser().map((c) => c.key), true);
+  resetLayout(): void {
+    try {
+      localStorage.removeItem('spt.' + STATE_KEY);
+    } catch {
+      /* ignore */
     }
-    this.syncChooser();
-  }
-
-  private syncChooser(): void {
-    const visible = new Map((this.grid?.getColumnState() ?? []).map((s) => [s.colId, !s.hide]));
-    this.chooser.update((cols) => cols.map((c) => ({ ...c, visible: visible.get(c.key) ?? c.visible })));
+    this.grid?.resetColumnState();
   }
 
   private saveState(): void {
@@ -232,7 +207,6 @@ export class TrackerList {
     if (this.grid && state) {
       this.grid.applyColumnState({ state, applyOrder: true });
     }
-    this.syncChooser();
   }
 
   open(e: RowClickedEvent<Tracker>): void {

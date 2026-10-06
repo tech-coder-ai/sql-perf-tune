@@ -6,6 +6,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
@@ -13,7 +14,7 @@ import { Api } from '../../core/api';
 import { QueryLog } from '../../core/models';
 import {
   LinkCell,
-  baseGridOptions,
+  serverGridOptions,
   minutesFormatter,
   numCol,
   pagedDatasource,
@@ -31,6 +32,7 @@ interface LogFilter {
   to: string;
   minDuration: number | null;
   errorsOnly: boolean;
+  reloadedOnly: boolean;
   groupId: number | null;
   batchId: number | null;
 }
@@ -43,6 +45,7 @@ const EMPTY: LogFilter = {
   to: '',
   minDuration: null,
   errorsOnly: false,
+  reloadedOnly: false,
   groupId: null,
   batchId: null,
 };
@@ -57,6 +60,7 @@ const EMPTY: LogFilter = {
     MatCheckboxModule,
     MatButtonModule,
     MatIconModule,
+    MatTooltipModule,
   ],
   templateUrl: './logs.html',
 })
@@ -70,21 +74,24 @@ export class Logs implements OnInit {
   readonly total = signal(0);
   filter: LogFilter = { ...EMPTY };
 
-  readonly gridOptions: GridOptions<QueryLog> = {
-    ...baseGridOptions,
-    rowModelType: 'infinite',
-    pagination: true,
-    paginationPageSize: 50,
-    paginationPageSizeSelector: [25, 50, 100],
-    cacheBlockSize: 100,
-    maxBlocksInCache: 20,
-  };
+  readonly gridOptions: GridOptions<QueryLog> = serverGridOptions<QueryLog>(50);
 
   readonly columns: ColDef<QueryLog>[] = [
     { field: 'seqId', headerName: 'Seq ID', sortable: true, width: 100, pinned: 'left', ...numCol },
     { field: 'startTime', headerName: 'Start time', sortable: true, width: 170, valueFormatter: tsFormatter, sort: 'desc' },
     { field: 'endTime', headerName: 'End time', sortable: true, width: 170, valueFormatter: tsFormatter },
     { field: 'durationMinutes', headerName: 'Duration', sortable: true, width: 115, valueFormatter: minutesFormatter, ...numCol },
+    {
+      field: 'seenCount',
+      headerName: 'Loads',
+      headerTooltip: 'How many loads contained this row. It was processed only by the first one.',
+      sortable: true,
+      width: 95,
+      ...numCol,
+      cellClassRules: { 'ag-reloaded': (p) => (p.value ?? 1) > 1 },
+    },
+    { field: 'createdAt', headerName: 'First loaded', sortable: true, width: 170, valueFormatter: tsFormatter, hide: true },
+    { field: 'lastSeenAt', headerName: 'Last seen', sortable: true, width: 170, valueFormatter: tsFormatter },
     { field: 'userId', headerName: 'User', sortable: true, width: 120 },
     { field: 'errorCode', headerName: 'Error code', sortable: true, width: 170 },
     { field: 'errorCategory', headerName: 'Error category', sortable: true, width: 140 },
@@ -110,7 +117,7 @@ export class Logs implements OnInit {
   onReady(e: GridReadyEvent<QueryLog>): void {
     this.grid = e.api;
     e.api.setGridOption(
-      'datasource',
+      'serverSideDatasource',
       pagedDatasource(
         (page, size, sort) => {
           const f = this.filter;
@@ -125,6 +132,7 @@ export class Logs implements OnInit {
             to: f.to ? f.to + ':59' : null,
             minDuration: f.minDuration,
             errorsOnly: f.errorsOnly || null,
+            reloadedOnly: f.reloadedOnly || null,
             groupId: f.groupId,
             batchId: f.batchId,
           });
@@ -137,7 +145,7 @@ export class Logs implements OnInit {
 
   search(): void {
     this.grid?.paginationGoToFirstPage();
-    this.grid?.purgeInfiniteCache();
+    this.grid?.refreshServerSide({ purge: true });
   }
 
   reset(): void {

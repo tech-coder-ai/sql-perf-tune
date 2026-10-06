@@ -33,7 +33,10 @@ contain a ```` ```sql ```` block (the default prompt asks for `### CHANGE NARRAT
 ```mermaid
 erDiagram
     SPT_DATA_SOURCE ||--o{ SPT_INGESTION_BATCH : "pulled by"
-    SPT_INGESTION_BATCH ||--o{ SPT_QUERY_LOG : loads
+    SPT_SOURCE_FILE ||--o{ SPT_INGESTION_BATCH : "uploaded as"
+    SPT_INGESTION_BATCH ||--o{ SPT_QUERY_LOG : "first loads"
+    SPT_QUERY_LOG ||--o{ SPT_QUERY_LOG_SIGHTING : "load history"
+    SPT_INGESTION_BATCH ||--o{ SPT_QUERY_LOG_SIGHTING : "saw"
     SPT_QUERY_GROUP ||--o{ SPT_QUERY_LOG : "groups (drill down)"
     SPT_QUERY_GROUP ||--o| SPT_TUNING_TRACKER : "tracked as (drill up)"
     SPT_QUERY_GROUP ||--o{ SPT_SQL_DIAGNOSTIC : "before / after"
@@ -53,7 +56,8 @@ the `SPT_TRACKER_V` reporting view join them live, so a re-import updates both s
 
 **Query log screen** (`SPT_QUERY_LOG`): seq_id, executed_query, user_query, error_code, error_category,
 error_message, user_id (header alias `useris` accepted), start_time, end_time, duration_minutes. Extra:
-`BATCH_ID` (which import), `FINGERPRINT`, `GROUP_ID`, `SQL_ENGINE`.
+`BATCH_ID` (the import that processed it), `FINGERPRINT`, `GROUP_ID`, `SQL_ENGINE`, `ROW_KEY`,
+`SEEN_COUNT` (loads containing the row), `LAST_SEEN_AT` / `LAST_SEEN_BATCH_ID`.
 
 **Grouping screen** (`SPT_QUERY_GROUP`): group_id (`ID`), group_size, user_id(s) (`USER_IDS`, plus
 `DISTINCT_USERS`), duration_count, avg/min/max/total_duration_minutes, sample_query, row_indices
@@ -77,6 +81,21 @@ Naming decisions:
 
 Added for enterprise use: `WORKFLOW_STATUS`, `PRIORITY`, audit columns, `VERSION` (optimistic locking:
 two people editing the same row get a 409 instead of silently overwriting each other).
+
+## Loads and de-duplication
+
+Logs may be loaded several times a day (files or JDBC). **Each log row is processed once**:
+
+- `SPT_QUERY_LOG.ROW_KEY` (unique) identifies a row: SHA-256 of engine, seq_id, user, start/end time and
+  SQL text (`spt.ingestion.row-identity=CONTENT`, or `SEQ_ID` for sources with stable unique ids).
+- A known row is not inserted, fingerprinted or regrouped again. The load adds a row to
+  `SPT_QUERY_LOG_SIGHTING` (history) and increments `SEEN_COUNT` / `LAST_SEEN_*` on the log row.
+- `SPT_SOURCE_FILE` stores the SHA-256 of every successfully processed upload with `LOAD_COUNT`. An
+  identical upload is **not parsed**: its batch gets `DUPLICATE_OF_BATCH_ID`, `FILE_LOAD_NUMBER` and
+  `ROWS_DUPLICATE`, and the processing batch's sightings are copied to it.
+- `SPT_INGESTION_BATCH` reports `ROWS_READ`, `ROWS_LOADED` (new), `ROWS_DUPLICATE`, `ROWS_REJECTED`.
+
+Details and the flow diagram: [developer-guide.md §5](developer-guide.md#5-ingestion-and-process-each-row-once).
 
 ## Fingerprinting (grouping key)
 

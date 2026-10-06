@@ -6,33 +6,47 @@ import {
   ClientSideRowModelModule,
   ColDef,
   ColumnApiModule,
+  GetContextMenuItems,
   GridOptions,
   ICellRendererParams,
-  IDatasource,
-  IGetRowsParams,
-  InfiniteRowModelModule,
+  IServerSideDatasource,
+  IServerSideGetRowsParams,
   ModuleRegistry,
   PaginationModule,
   RenderApiModule,
   RowApiModule,
   RowSelectionModule,
   RowStyleModule,
+  SideBarDef,
   SortModelItem,
   TooltipModule,
   ValidationModule,
   ValueFormatterParams,
   themeQuartz,
 } from 'ag-grid-community';
+import {
+  CellSelectionModule,
+  ClipboardModule,
+  ColumnMenuModule,
+  ColumnsToolPanelModule,
+  ContextMenuModule,
+  ExcelExportModule,
+  MasterDetailModule,
+  ServerSideRowModelApiModule,
+  ServerSideRowModelModule,
+  SideBarModule,
+  StatusBarModule,
+} from 'ag-grid-enterprise';
 import { Observable } from 'rxjs';
 import { Page } from '../core/models';
 import { formatMinutes } from './format';
 import { StatusChip } from './status-chip';
 
-// Register only the AG Grid Community features the app uses (keeps the bundle small).
+// Register only the AG Grid features the app uses (keeps the bundle small).
 // In development the ValidationModule reports any feature that is used but not registered.
 ModuleRegistry.registerModules([
+  // community
   ClientSideRowModelModule,
-  InfiniteRowModelModule,
   PaginationModule,
   RowSelectionModule,
   TooltipModule,
@@ -41,8 +55,21 @@ ModuleRegistry.registerModules([
   ColumnApiModule,
   RenderApiModule,
   RowApiModule,
+  // enterprise
+  ServerSideRowModelModule,
+  ServerSideRowModelApiModule,
+  MasterDetailModule,
+  SideBarModule,
+  ColumnsToolPanelModule,
+  ColumnMenuModule,
+  ContextMenuModule,
+  CellSelectionModule,
+  ClipboardModule,
+  ExcelExportModule,
+  StatusBarModule,
   ...(isDevMode() ? [ValidationModule] : []),
 ]);
+
 
 /**
  * AG Grid theme wired to the app's CSS tokens. The tokens use light-dark(), so the grid follows the
@@ -71,9 +98,36 @@ export const defaultColDef: ColDef = {
   sortable: false,
   resizable: true,
   filter: false,
-  suppressHeaderMenuButton: true,
   minWidth: 80,
+  // enterprise column menu: pin, autosize, choose columns (filters are server side, in the form above the grid)
+  mainMenuItems: ['pinSubMenu', 'separator', 'autoSizeThis', 'autoSizeAll', 'separator', 'columnChooser', 'resetColumns'],
 };
+
+/** Columns tool panel (show / hide / reorder) on the right of every large grid. */
+export const columnsSideBar: SideBarDef = {
+  toolPanels: [
+    {
+      id: 'columns',
+      labelDefault: 'Columns',
+      labelKey: 'columns',
+      iconKey: 'columns',
+      toolPanel: 'agColumnsToolPanel',
+      toolPanelParams: { suppressRowGroups: true, suppressValues: true, suppressPivots: true, suppressPivotMode: true },
+    },
+  ],
+};
+
+/** Right-click menu: copy cells (Excel friendly) and export what is loaded. */
+export const contextMenu: GetContextMenuItems = () => [
+  'copy',
+  'copyWithHeaders',
+  'separator',
+  {
+    name: 'Export loaded rows to Excel',
+    icon: '<span class="ag-icon ag-icon-excel"></span>',
+    action: (p) => p.api.exportDataAsExcel({ fileName: 'sql-tuning-export.xlsx' }),
+  },
+];
 
 /** Common options for every grid in the app. */
 export const baseGridOptions: GridOptions = {
@@ -86,7 +140,23 @@ export const baseGridOptions: GridOptions = {
   tooltipShowDelay: 400,
   overlayNoRowsTemplate: '<span class="grid-empty">No rows to show</span>',
   rowClass: 'clickable',
+  cellSelection: true,
+  getContextMenuItems: contextMenu,
 };
+
+/** Server-side row model with the app's paging defaults (enterprise). */
+export function serverGridOptions<T>(pageSize = 50): GridOptions<T> {
+  return {
+    ...(baseGridOptions as GridOptions<T>),
+    rowModelType: 'serverSide',
+    pagination: true,
+    paginationPageSize: pageSize,
+    paginationPageSizeSelector: [10, 25, 50, 100],
+    cacheBlockSize: 100,
+    maxBlocksInCache: 20,
+    sideBar: columnsSideBar,
+  };
+}
 
 // ---------------------------------------------------------------- formatters
 
@@ -112,23 +182,24 @@ export function toServerSort(model: SortModelItem[], map: Record<string, string>
 }
 
 /**
- * Infinite-row-model datasource backed by a paged REST endpoint (AG Grid Community).
- * Each grid block is fetched as one API page, so cacheBlockSize must equal the requested page size.
+ * Server-side-row-model datasource backed by a paged REST endpoint. Each grid block is fetched as one API
+ * page; sorting is done by the API.
  */
 export function pagedDatasource<T>(
   fetch: (page: number, size: number, sort: string) => Observable<Page<T>>,
   sortMap: Record<string, string> = {},
   onLoaded?: (total: number) => void,
-): IDatasource {
+): IServerSideDatasource {
   return {
-    getRows: (p: IGetRowsParams) => {
-      const size = p.endRow - p.startRow;
-      fetch(Math.floor(p.startRow / size), size, toServerSort(p.sortModel, sortMap)).subscribe({
+    getRows: (p: IServerSideGetRowsParams) => {
+      const start = p.request.startRow ?? 0;
+      const size = (p.request.endRow ?? start + 100) - start;
+      fetch(Math.floor(start / size), size, toServerSort(p.request.sortModel, sortMap)).subscribe({
         next: (page) => {
-          p.successCallback(page.content, page.totalElements);
+          p.success({ rowData: page.content, rowCount: page.totalElements });
           onLoaded?.(page.totalElements);
         },
-        error: () => p.failCallback(),
+        error: () => p.fail(),
       });
     },
   };

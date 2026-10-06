@@ -12,7 +12,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridOptions } from 'ag-grid-community';
 import { Api } from '../../core/api';
-import { CustomEntityType, CustomField, DataSource, IngestionBatch, PromptTemplate } from '../../core/models';
+import { CustomEntityType, CustomField, DataSource, IngestionBatch, PromptTemplate, SourceFile } from '../../core/models';
 import { TimestampPipe } from '../../shared/format';
 import { LinkCell, StatusCell, baseGridOptions, numCol, tsFormatter } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
@@ -55,6 +55,24 @@ export class Admin {
   field: Partial<CustomField> = this.newField();
   prompt = { name: 'impala-default', sqlEngine: 'IMPALA', templateText: '', notes: '' };
 
+  readonly files = signal<SourceFile[]>([]);
+  readonly fileGrid: GridOptions<SourceFile> = { ...baseGridOptions, rowClass: undefined, pagination: true, paginationPageSize: 20 };
+  readonly fileCols: ColDef<SourceFile>[] = [
+    { field: 'fileName', headerName: 'File', flex: 1, minWidth: 220, sortable: true },
+    { field: 'loadCount', headerName: 'Times loaded', width: 130, sortable: true, ...numCol, cellClassRules: { 'ag-reloaded': (p) => p.value > 1 } },
+    { field: 'firstLoadedAt', headerName: 'First loaded', width: 170, sortable: true, valueFormatter: tsFormatter },
+    { field: 'lastLoadedAt', headerName: 'Last loaded', width: 170, sortable: true, sort: 'desc', valueFormatter: tsFormatter },
+    {
+      field: 'processedBatchId',
+      headerName: 'Processed by',
+      width: 130,
+      cellRenderer: LinkCell,
+      cellRendererParams: { link: () => ['/logs'], query: (f: SourceFile) => ({ batchId: f.processedBatchId }), text: (f: SourceFile) => 'import #' + f.processedBatchId },
+    },
+    { field: 'fileSize', headerName: 'Size', width: 110, valueFormatter: (p) => (p.value ? (p.value / 1024).toFixed(0) + ' KB' : ''), ...numCol },
+    { field: 'contentHash', headerName: 'SHA-256', width: 200, cellClass: 'ag-sql', tooltip: (p) => p.data?.contentHash },
+  ];
+
   readonly batchGrid: GridOptions<IngestionBatch> = {
     ...baseGridOptions,
     rowClass: undefined,
@@ -82,7 +100,31 @@ export class Admin {
     { field: 'sqlEngine', headerName: 'Engine', width: 100 },
     { field: 'status', headerName: 'Status', width: 210, sortable: true, cellRenderer: StatusCell, tooltip: (p) => p.data?.message },
     { field: 'rowsRead', headerName: 'Read', width: 95, sortable: true, ...numCol },
-    { field: 'rowsLoaded', headerName: 'Loaded', width: 100, sortable: true, ...numCol },
+    { field: 'rowsLoaded', headerName: 'New', headerTooltip: 'New rows processed by this import', width: 90, sortable: true, ...numCol },
+    {
+      field: 'rowsDuplicate',
+      headerName: 'Already loaded',
+      headerTooltip: 'Rows loaded before (or repeated in the file): counted, not re-processed',
+      width: 140,
+      sortable: true,
+      ...numCol,
+      cellClassRules: { 'ag-reloaded': (p) => p.value > 0 },
+    },
+    {
+      field: 'fileLoadNumber',
+      headerName: 'File load #',
+      width: 115,
+      sortable: true,
+      ...numCol,
+      cellClassRules: { 'ag-reloaded': (p) => p.value > 1 },
+    },
+    {
+      field: 'duplicateOfBatchId',
+      headerName: 'Duplicate of',
+      width: 125,
+      valueFormatter: (p) => (p.value ? 'import #' + p.value : ''),
+      cellClass: 'ag-reloaded',
+    },
     { field: 'rowsRejected', headerName: 'Rejected', width: 105, sortable: true, ...numCol },
     { field: 'groupsAffected', headerName: 'Groups', width: 100, sortable: true, ...numCol },
     { field: 'startedAt', headerName: 'Started', width: 170, sortable: true, valueFormatter: tsFormatter },
@@ -103,6 +145,7 @@ export class Admin {
       if (active && !this.prompt.templateText) this.prompt.templateText = active.templateText;
     });
     this.api.batches().subscribe((b) => this.batches.set(b));
+    this.api.loadedFiles().subscribe((f) => this.files.set(f));
     this.loadFields();
   }
 

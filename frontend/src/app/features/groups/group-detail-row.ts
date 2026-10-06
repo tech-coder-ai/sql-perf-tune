@@ -8,7 +8,7 @@ import { QueryGroup } from '../../core/models';
 import { SqlBlock } from '../../shared/sql-block';
 import { GroupMembers } from './group-members';
 
-/** Full-width detail row shown under an expanded group: grouping key + member log rows. */
+/** Master/detail (AG Grid Enterprise) detail panel of a group: grouping key + member log rows. */
 @Component({
   selector: 'app-group-detail-row',
   imports: [RouterLink, MatButtonModule, MatIconModule, SqlBlock, GroupMembers],
@@ -46,7 +46,7 @@ export class GroupDetailRow implements ICellRendererAngularComp {
   group: QueryGroup | null = null;
 
   agInit(p: ICellRendererParams): void {
-    this.group = p.data?.group ?? null;
+    this.group = p.data ?? null;
   }
 
   refresh(): boolean {

@@ -1,7 +1,6 @@
 package com.techcoder.sqlperf.ingestion;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.List;
 
 import org.springframework.data.domain.Sort;
@@ -21,10 +20,12 @@ public class IngestionController {
 
     private final IngestionService service;
     private final IngestionBatchRepository batches;
+    private final SourceFileRepository files;
 
-    public IngestionController(IngestionService service, IngestionBatchRepository batches) {
+    public IngestionController(IngestionService service, IngestionBatchRepository batches, SourceFileRepository files) {
         this.service = service;
         this.batches = batches;
+        this.files = files;
     }
 
     /** Upload a CSV / Excel query log. */
@@ -34,9 +35,7 @@ public class IngestionController {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("The uploaded file is empty");
         }
-        try (InputStream in = file.getInputStream()) {
-            return service.importFile(file.getOriginalFilename(), in, sqlEngine);
-        }
+        return service.importFile(file.getOriginalFilename(), file, sqlEngine);
     }
 
     /** Pull new rows from a configured Oracle / Impala data source. */
@@ -48,5 +47,11 @@ public class IngestionController {
     @GetMapping("/batches")
     public List<IngestionBatch> batches() {
         return batches.findAll(Sort.by(Sort.Direction.DESC, "id"));
+    }
+
+    /** Distinct files loaded so far with their load counts. */
+    @GetMapping("/files")
+    public List<SourceFile> files() {
+        return files.findAll(Sort.by(Sort.Direction.DESC, "lastLoadedAt"));
     }
 }

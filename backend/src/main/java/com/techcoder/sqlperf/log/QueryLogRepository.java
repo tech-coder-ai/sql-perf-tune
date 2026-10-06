@@ -1,6 +1,7 @@
 package com.techcoder.sqlperf.log;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.domain.Page;
@@ -66,6 +67,19 @@ public interface QueryLogRepository extends JpaRepository<QueryLog, Long>, JpaSp
             from QueryLog l where l.fingerprint is not null
             """)
     List<FingerprintKey> allFingerprintKeys();
+
+    List<QueryLog> findByRowKeyIn(Collection<String> rowKeys);
+
+    @Query("select l from QueryLog l where l.rowKey is null order by l.id")
+    List<QueryLog> withoutRowKey(Pageable pageable);
+
+    /** Marks rows seen again by a load (used for identical-file re-loads). */
+    @Modifying
+    @Query("""
+            update QueryLog l set l.seenCount = l.seenCount + 1, l.lastSeenAt = :seenAt, l.lastSeenBatchId = :batchId
+            where l.id in (select s.logId from LogSighting s where s.batchId = :batchId)
+            """)
+    int markSeenByBatch(@Param("batchId") Long batchId, @Param("seenAt") LocalDateTime seenAt);
 
     @Query("select l from QueryLog l where l.id > :afterId order by l.id")
     List<QueryLog> pageAfter(@Param("afterId") long afterId, Pageable pageable);

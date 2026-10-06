@@ -1,53 +1,20 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
-import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router, RouterLink } from '@angular/router';
 import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
-import {
-  ColDef,
-  GridApi,
-  GridOptions,
-  GridReadyEvent,
-  ICellRendererParams,
-  RowClickedEvent,
-  SortChangedEvent,
-} from 'ag-grid-community';
+import { ColDef, GridApi, GridOptions, GridReadyEvent, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryGroup } from '../../core/models';
-import { LinkCell, baseGridOptions, minutesFormatter, numCol, sqlCol, toServerSort } from '../../shared/grid';
+import { LinkCell, minutesFormatter, numCol, pagedDatasource, serverGridOptions, sqlCol } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupDetailRow } from './group-detail-row';
-
-/** A page row is either a group (master) or the full-width detail row under an expanded group. */
-interface GroupRow extends QueryGroup {
-  kind: 'group' | 'detail';
-  group?: QueryGroup;
-}
-
-/** Expand / collapse chevron. */
-@Component({
-  selector: 'app-expand-cell',
-  imports: [MatIconModule],
-  template: `<mat-icon class="chev" [attr.aria-label]="open ? 'Collapse' : 'Expand'">{{ open ? 'expand_less' : 'expand_more' }}</mat-icon>`,
-  styles: `.chev { vertical-align: middle; color: var(--spt-muted); }`,
-})
-export class ExpandCell implements ICellRendererAngularComp {
-  open = false;
-  agInit(p: ICellRendererParams<GroupRow>): void {
-    this.open = (p.context as Groups).expanded() === p.data?.groupId;
-  }
-  refresh(p: ICellRendererParams<GroupRow>): boolean {
-    this.agInit(p);
-    return true;
-  }
-}
 
 /** Tracker status link, or a "Track" button for untracked groups (drill up). */
 @Component({
@@ -64,11 +31,11 @@ export class ExpandCell implements ICellRendererAngularComp {
 export class TrackerCell implements ICellRendererAngularComp {
   row: QueryGroup | null = null;
   private parent!: Groups;
-  agInit(p: ICellRendererParams<GroupRow>): void {
-    this.row = p.data?.kind === 'group' ? p.data : null;
+  agInit(p: ICellRendererParams<QueryGroup>): void {
+    this.row = p.data ?? null;
     this.parent = p.context;
   }
-  refresh(p: ICellRendererParams<GroupRow>): boolean {
+  refresh(p: ICellRendererParams<QueryGroup>): boolean {
     this.agInit(p);
     return true;
   }
@@ -78,15 +45,15 @@ export class TrackerCell implements ICellRendererAngularComp {
   }
 }
 
-/** Keeps the server's order (and each detail row right below its group) when the user clicks a header. */
-const serverOrder = () => 0;
-
+/**
+ * Grouping screen: AG Grid Enterprise server-side row model with master/detail - each group expands into
+ * its grouping key and the original log rows.
+ */
 @Component({
   selector: 'app-groups',
   imports: [
     FormsModule,
     AgGridAngular,
-    MatPaginatorModule,
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
@@ -97,43 +64,41 @@ const serverOrder = () => 0;
   templateUrl: './groups.html',
   styleUrl: './groups.scss',
 })
-export class Groups implements OnInit {
+export class Groups {
   private readonly api = inject(Api);
   private readonly snack = inject(MatSnackBar);
   private readonly router = inject(Router);
-  private grid?: GridApi<GroupRow>;
+  private grid?: GridApi<QueryGroup>;
 
-  readonly page = signal<QueryGroup[]>([]);
-  readonly rows = signal<GroupRow[]>([]);
   readonly total = signal(0);
-  readonly loading = signal(false);
-  readonly expanded = signal<number | null>(null);
   readonly selected = signal<number[]>([]);
 
   filter = { q: '', userId: '', minGroupSize: null as number | null, minAvgDuration: null as number | null, tracked: '' };
-  pageIndex = 0;
-  pageSize = 25;
-  sort = 'totalDurationMinutes,desc';
 
-  readonly gridOptions: GridOptions<GroupRow> = {
-    ...baseGridOptions,
+  readonly gridOptions: GridOptions<QueryGroup> = {
+    ...serverGridOptions<QueryGroup>(25),
     context: this,
-    getRowId: (p) => (p.data.kind === 'detail' ? 'd' : 'g') + p.data.groupId,
-    isFullWidthRow: (p) => p.rowNode.data?.kind === 'detail',
-    fullWidthCellRenderer: GroupDetailRow,
-    getRowHeight: (p) => (p.data?.kind === 'detail' ? 520 : undefined),
-    rowSelection: {
-      mode: 'multiRow',
-      checkboxes: true,
-      headerCheckbox: true,
-      enableClickSelection: false,
-      isRowSelectable: (n) => n.data?.kind === 'group',
-    },
+    getRowId: (p) => String(p.data.groupId),
+    masterDetail: true,
+    isRowMaster: () => true,
+    detailCellRenderer: GroupDetailRow,
+    detailRowHeight: 520,
+    rowSelection: { mode: 'multiRow', checkboxes: true, headerCheckbox: false, enableClickSelection: false },
     selectionColumnDef: { pinned: 'left', width: 48 },
   };
 
-  readonly columns: ColDef<GroupRow>[] = [
-    { colId: 'expand', headerName: '', width: 52, pinned: 'left', cellRenderer: ExpandCell, resizable: false },
+  readonly columns: ColDef<QueryGroup>[] = [
+    {
+      colId: 'expand',
+      headerName: '',
+      width: 48,
+      pinned: 'left',
+      cellRenderer: 'agGroupCellRenderer',
+      valueGetter: () => '',
+      resizable: false,
+      suppressHeaderMenuButton: true,
+      suppressColumnsToolPanel: true,
+    },
     {
       colId: 'id',
       field: 'groupId',
@@ -141,37 +106,34 @@ export class Groups implements OnInit {
       width: 105,
       pinned: 'left',
       sortable: true,
-      comparator: serverOrder,
       cellRenderer: LinkCell,
       cellRendererParams: { link: (r: QueryGroup) => ['/groups', r.groupId], text: (r: QueryGroup) => '#' + r.groupId },
     },
-    { colId: 'groupSize', field: 'groupSize', headerName: 'Group size', width: 110, sortable: true, comparator: serverOrder, ...numCol },
+    { colId: 'groupSize', field: 'groupSize', headerName: 'Group size', width: 115, sortable: true, ...numCol },
     {
       colId: 'distinctUsers',
       headerName: 'User ID(s)',
       width: 240,
       sortable: true,
-      comparator: serverOrder,
       valueGetter: (p) => (p.data ? `${p.data.distinctUsers} · ${p.data.userIds ?? ''}` : ''),
       tooltip: (p) => p.data?.userIds,
     },
-    { colId: 'durationCount', field: 'durationCount', headerName: 'Duration count', width: 135, sortable: true, comparator: serverOrder, ...numCol },
-    { colId: 'avgDurationMinutes', field: 'avgDurationMinutes', headerName: 'Avg', width: 105, sortable: true, comparator: serverOrder, valueFormatter: minutesFormatter, ...numCol },
-    { colId: 'minDurationMinutes', field: 'minDurationMinutes', headerName: 'Min', width: 105, sortable: true, comparator: serverOrder, valueFormatter: minutesFormatter, ...numCol },
-    { colId: 'maxDurationMinutes', field: 'maxDurationMinutes', headerName: 'Max', width: 105, sortable: true, comparator: serverOrder, valueFormatter: minutesFormatter, ...numCol },
+    { colId: 'durationCount', field: 'durationCount', headerName: 'Duration count', width: 140, sortable: true, ...numCol },
+    { colId: 'avgDurationMinutes', field: 'avgDurationMinutes', headerName: 'Avg', width: 110, sortable: true, valueFormatter: minutesFormatter, ...numCol },
+    { colId: 'minDurationMinutes', field: 'minDurationMinutes', headerName: 'Min', width: 110, sortable: true, valueFormatter: minutesFormatter, ...numCol },
+    { colId: 'maxDurationMinutes', field: 'maxDurationMinutes', headerName: 'Max', width: 110, sortable: true, valueFormatter: minutesFormatter, ...numCol },
     {
       colId: 'totalDurationMinutes',
       field: 'totalDurationMinutes',
       headerName: 'Total',
-      width: 115,
+      width: 120,
       sortable: true,
       sort: 'desc',
-      comparator: serverOrder,
       valueFormatter: minutesFormatter,
       ...numCol,
       cellClass: 'ag-num ag-strong',
     },
-    { colId: 'errorCount', field: 'errorCount', headerName: 'Errors', width: 95, sortable: true, comparator: serverOrder, ...numCol },
+    { colId: 'errorCount', field: 'errorCount', headerName: 'Errors', width: 100, sortable: true, ...numCol },
     { colId: 'sampleQuerySeqId', field: 'sampleQuery', headerName: 'Sample query', ...sqlCol, minWidth: 320, flex: 1 },
     { colId: 'rowIndices', field: 'rowIndices', headerName: 'Row indices', width: 160, cellClass: 'ag-sql', tooltip: (p) => p.data?.rowIndices },
     {
@@ -186,85 +148,46 @@ export class Groups implements OnInit {
     { colId: 'tracker', headerName: 'Tracker', width: 175, pinned: 'right', cellRenderer: TrackerCell },
   ];
 
-  ngOnInit(): void {
-    this.load();
-  }
-
-  onReady(e: GridReadyEvent<GroupRow>): void {
+  onReady(e: GridReadyEvent<QueryGroup>): void {
     this.grid = e.api;
-  }
-
-  load(): void {
-    this.loading.set(true);
-    this.grid?.setGridOption('loading', true);
-    const f = this.filter;
-    this.api
-      .groups({
-        page: this.pageIndex,
-        size: this.pageSize,
-        sort: this.sort,
-        q: f.q,
-        userId: f.userId,
-        minGroupSize: f.minGroupSize,
-        minAvgDuration: f.minAvgDuration,
-        tracked: f.tracked || null,
-      })
-      .subscribe({
-        next: (p) => {
-          this.page.set(p.content);
-          this.total.set(p.totalElements);
-          this.selected.set([]);
-          this.rebuildRows();
-          this.loading.set(false);
-          this.grid?.setGridOption('loading', false);
+    e.api.setGridOption(
+      'serverSideDatasource',
+      pagedDatasource(
+        (page, size, sort) => {
+          const f = this.filter;
+          return this.api.groups({
+            page,
+            size,
+            sort: sort || 'totalDurationMinutes,desc',
+            q: f.q,
+            userId: f.userId,
+            minGroupSize: f.minGroupSize,
+            minAvgDuration: f.minAvgDuration,
+            tracked: f.tracked || null,
+          });
         },
-        error: () => {
-          this.loading.set(false);
-          this.grid?.setGridOption('loading', false);
-        },
-      });
-  }
-
-  private rebuildRows(): void {
-    const out: GroupRow[] = [];
-    for (const g of this.page()) {
-      out.push({ ...g, kind: 'group' });
-      if (this.expanded() === g.groupId) out.push({ ...g, kind: 'detail', group: g });
-    }
-    this.rows.set(out);
+        {},
+        (total) => this.total.set(total),
+      ),
+    );
   }
 
   search(): void {
-    this.pageIndex = 0;
-    this.load();
+    this.selected.set([]);
+    this.grid?.deselectAll();
+    this.grid?.paginationGoToFirstPage();
+    this.grid?.refreshServerSide({ purge: true });
   }
 
-  onSort(e: SortChangedEvent<GroupRow>): void {
-    const model = e.api
-      .getColumnState()
-      .filter((c) => c.sort)
-      .map((c) => ({ colId: c.colId, sort: c.sort! }));
-    this.sort = toServerSort(model) || 'totalDurationMinutes,desc';
-    this.search();
-  }
-
-  onPage(e: PageEvent): void {
-    this.pageIndex = e.pageIndex;
-    this.pageSize = e.pageSize;
-    this.load();
-  }
-
-  onRowClicked(e: RowClickedEvent<GroupRow>): void {
-    if (e.data?.kind !== 'group') return;
-    this.expanded.set(this.expanded() === e.data.groupId ? null : e.data.groupId);
-    this.rebuildRows();
-    setTimeout(() => this.grid?.refreshCells({ columns: ['expand'], force: true }));
+  /** Clicking a row toggles its detail (the chevron handles its own clicks). */
+  onRowClicked(e: RowClickedEvent<QueryGroup>): void {
+    const target = e.event?.target as HTMLElement | undefined;
+    if (!e.node.master || target?.closest('.ag-group-contracted, .ag-group-expanded, .ag-selection-checkbox, a, button')) return;
+    e.node.setExpanded(!e.node.expanded);
   }
 
   onSelection(): void {
-    this.selected.set(
-      (this.grid?.getSelectedRows() ?? []).filter((r) => r.kind === 'group').map((r) => r.groupId),
-    );
+    this.selected.set((this.grid?.getSelectedRows() ?? []).map((r) => r.groupId));
   }
 
   track(ids: number[]): void {
@@ -273,7 +196,7 @@ export class Groups implements OnInit {
         .open(`${t.length} group(s) on the tracker`, 'Open tracker', { duration: 5000 })
         .onAction()
         .subscribe(() => this.router.navigate(['/tracker']));
-      this.load();
+      this.search();
     });
   }
 

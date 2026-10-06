@@ -4,7 +4,7 @@ import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryLog } from '../../core/models';
-import { baseGridOptions, minutesFormatter, numCol, pagedDatasource, sqlCol, tsFormatter } from '../../shared/grid';
+import { serverGridOptions, minutesFormatter, numCol, pagedDatasource, sqlCol, tsFormatter } from '../../shared/grid';
 import { LogDetailDialog } from '../logs/log-detail-dialog';
 
 /** Drill-down: the original log rows that make up a group (server paged). */
@@ -29,14 +29,7 @@ export class GroupMembers {
   private readonly api = inject(Api);
   private readonly dialog = inject(MatDialog);
 
-  readonly gridOptions: GridOptions<QueryLog> = {
-    ...baseGridOptions,
-    rowModelType: 'infinite',
-    pagination: true,
-    paginationPageSize: 10,
-    paginationPageSizeSelector: [10, 20, 50],
-    cacheBlockSize: 50,
-  };
+  readonly gridOptions: GridOptions<QueryLog> = { ...serverGridOptions<QueryLog>(10), sideBar: false };
 
   readonly columns: ColDef<QueryLog>[] = [
     { field: 'seqId', headerName: 'Seq ID', sortable: true, width: 100, ...numCol },
@@ -44,12 +37,13 @@ export class GroupMembers {
     { field: 'startTime', headerName: 'Start time', sortable: true, width: 170, valueFormatter: tsFormatter },
     { field: 'durationMinutes', headerName: 'Duration', sortable: true, width: 115, sort: 'desc', valueFormatter: minutesFormatter, ...numCol },
     { headerName: 'Error', width: 200, valueGetter: (p) => [p.data?.errorCode, p.data?.errorCategory].filter(Boolean).join(' · ') },
+    { field: 'seenCount', headerName: 'Loads', sortable: true, width: 90, ...numCol },
     { headerName: 'Executed query', valueGetter: (p) => p.data?.executedQuery || p.data?.userQuery, ...sqlCol, flex: 1, minWidth: 300 },
   ];
 
   onReady(e: GridReadyEvent<QueryLog>): void {
     e.api.setGridOption(
-      'datasource',
+      'serverSideDatasource',
       pagedDatasource((page, size, sort) => this.api.groupLogs(this.groupId(), { page, size, sort })),
     );
   }

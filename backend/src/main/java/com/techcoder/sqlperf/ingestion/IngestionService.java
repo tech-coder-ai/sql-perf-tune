@@ -2,12 +2,22 @@ package com.techcoder.sqlperf.ingestion;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.techcoder.sqlperf.common.CurrentUser;
 import com.techcoder.sqlperf.common.NotFoundException;
@@ -17,18 +27,30 @@ import com.techcoder.sqlperf.config.SptProperties;
 import com.techcoder.sqlperf.group.GroupingService;
 import com.techcoder.sqlperf.ingestion.IngestionBatch.SourceKind;
 import com.techcoder.sqlperf.ingestion.IngestionBatch.Status;
+import com.techcoder.sqlperf.log.LogSighting;
+import com.techcoder.sqlperf.log.LogSightingRepository;
 import com.techcoder.sqlperf.log.QueryLog;
 import com.techcoder.sqlperf.log.QueryLogRepository;
 import com.techcoder.sqlperf.log.QueryLogRepository.FingerprintKey;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.InputStreamSource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Loads query logs (file or JDBC), fingerprints every row and refreshes the affected groups.
- * Rows are written in chunks so a large file never holds one giant transaction.
+ * Loads query logs (file or JDBC) so that <b>every log row is processed exactly once</b>:
+ * <ul>
+ *   <li>An upload whose bytes were already loaded is not parsed again. The import is flagged with the
+ *       import that processed it ({@code DUPLICATE_OF_BATCH_ID}), the file's load count is increased and
+ *       each of its rows gets a sighting.</li>
+ *   <li>Otherwise rows are parsed and identified by {@link RowKeys}. Known rows (from earlier loads or
+ *       repeated in the same file) only get a sighting and a higher {@code SEEN_COUNT}; new rows are
+ *       inserted, fingerprinted and grouped.</li>
+ * </ul>
+ * Imports are serialized within the service instance; the unique index on {@code ROW_KEY} guarantees the
+ * rule across instances (a concurrent duplicate makes that chunk fail instead of double counting).
  */
 @Service
 public class IngestionService {
@@ -37,44 +59,69 @@ public class IngestionService {
 
     private final IngestionBatchRepository batches;
     private final QueryLogRepository logs;
+    private final LogSightingRepository sightings;
+    private final SourceFileRepository files;
     private final SourceConnectionRepository sources;
     private final LogFileParser fileParser;
     private final JdbcLogPuller puller;
     private final GroupingService grouping;
+    private final RowKeys rowKeys;
     private final TransactionTemplate tx;
     private final EntityManager em;
     private final SptProperties props;
+    private final ReentrantLock lock = new ReentrantLock(true);
 
-    public IngestionService(IngestionBatchRepository batches, QueryLogRepository logs, SourceConnectionRepository sources,
-                            LogFileParser fileParser, JdbcLogPuller puller, GroupingService grouping,
-                            TransactionTemplate tx, EntityManager em, SptProperties props) {
+    public IngestionService(IngestionBatchRepository batches, QueryLogRepository logs, LogSightingRepository sightings,
+                            SourceFileRepository files, SourceConnectionRepository sources, LogFileParser fileParser,
+                            JdbcLogPuller puller, GroupingService grouping, RowKeys rowKeys, TransactionTemplate tx,
+                            EntityManager em, SptProperties props) {
         this.batches = batches;
         this.logs = logs;
+        this.sightings = sightings;
+        this.files = files;
         this.sources = sources;
         this.fileParser = fileParser;
         this.puller = puller;
         this.grouping = grouping;
+        this.rowKeys = rowKeys;
         this.tx = tx;
         this.em = em;
         this.props = props;
     }
 
-    public IngestionBatch importFile(String fileName, InputStream in, String sqlEngine) {
+    /** @param source re-readable content (a MultipartFile or a Resource): hashed first, then parsed if new */
+    public IngestionBatch importFile(String fileName, InputStreamSource source, String sqlEngine) {
         String engine = engine(sqlEngine);
         String lower = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
         SourceKind kind = lower.endsWith(".xlsx") || lower.endsWith(".xls") ? SourceKind.EXCEL : SourceKind.CSV;
-        IngestionBatch batch = start(kind, null, fileName, engine);
-        Loader loader = new Loader(batch);
+        lock.lock();
         try {
-            if (kind == SourceKind.EXCEL) {
-                fileParser.parseExcel(in, loader);
-            } else {
-                fileParser.parseCsv(in, loader);
+            FileDigest digest = digest(source);
+            Optional<SourceFile> known = files.findByContentHash(digest.hash());
+            if (known.isPresent()) {
+                return reloadOfKnownFile(known.get(), kind, fileName, engine, digest);
             }
-            return finish(loader, null);
-        } catch (IOException | RuntimeException e) {
-            log.warn("Import of {} failed", fileName, e);
-            return fail(loader, e);
+            IngestionBatch batch = start(kind, null, fileName, engine);
+            batch.setContentHash(digest.hash());
+            batch.setFileLoadNumber(1);
+            Loader loader = new Loader(batch);
+            try (InputStream in = source.getInputStream()) {
+                if (kind == SourceKind.EXCEL) {
+                    fileParser.parseExcel(in, loader);
+                } else {
+                    fileParser.parseCsv(in, loader);
+                }
+                IngestionBatch done = finish(loader);
+                registerFile(done, fileName, digest);
+                return done;
+            } catch (IOException | RuntimeException e) {
+                log.warn("Import of {} failed", fileName, e);
+                return fail(loader, e);
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Cannot read " + fileName + ": " + e.getMessage(), e);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -83,18 +130,93 @@ public class IngestionService {
         if (!src.isActive()) {
             throw new IllegalArgumentException("Data source " + src.getName() + " is inactive");
         }
-        IngestionBatch batch = start(SourceKind.JDBC, src.getId(), src.getName(), engine(src.getSqlEngine()));
-        Loader loader = new Loader(batch);
+        lock.lock();
         try {
-            LocalDateTime watermark = puller.pull(src, loader);
-            IngestionBatch done = finish(loader, null);
-            tx.executeWithoutResult(s -> sources.findById(sourceId).ifPresent(fresh -> fresh.setLastWatermark(watermark)));
-            return done;
-        } catch (Exception e) {
-            log.warn("Pull from data source {} failed", src.getName(), e);
-            return fail(loader, e);
+            IngestionBatch batch = start(SourceKind.JDBC, src.getId(), src.getName(), engine(src.getSqlEngine()));
+            Loader loader = new Loader(batch);
+            try {
+                LocalDateTime watermark = puller.pull(src, loader);
+                IngestionBatch done = finish(loader);
+                tx.executeWithoutResult(s -> sources.findById(sourceId).ifPresent(f -> f.setLastWatermark(watermark)));
+                return done;
+            } catch (Exception e) {
+                log.warn("Pull from data source {} failed", src.getName(), e);
+                return fail(loader, e);
+            }
+        } finally {
+            lock.unlock();
         }
     }
+
+    // ------------------------------------------------------------------ identical file re-load
+
+    private IngestionBatch reloadOfKnownFile(SourceFile file, SourceKind kind, String fileName, String engine,
+                                             FileDigest digest) {
+        IngestionBatch batch = start(kind, null, fileName, engine);
+        return tx.execute(s -> {
+            LocalDateTime now = LocalDateTime.now();
+            int rows = sightings.copyFromBatch(file.getProcessedBatchId(), batch.getId(), now);
+            logs.markSeenByBatch(batch.getId(), now);
+            SourceFile f = files.findById(file.getId()).orElseThrow();
+            f.setLoadCount(f.getLoadCount() + 1);
+            f.setLastBatchId(batch.getId());
+            f.setLastLoadedAt(now);
+
+            IngestionBatch b = batches.findById(batch.getId()).orElseThrow();
+            b.setContentHash(digest.hash());
+            b.setSourceFileId(f.getId());
+            b.setFileLoadNumber(f.getLoadCount());
+            b.setDuplicateOfBatchId(f.getProcessedBatchId());
+            b.setRowsRead(rows);
+            b.setRowsDuplicate(rows);
+            b.setStatus(Status.COMPLETED);
+            b.setMessage("Identical file already processed by import #" + f.getProcessedBatchId() + " (load "
+                    + f.getLoadCount() + " of this file). Not re-processed; " + rows + " rows marked as seen again.");
+            b.setCompletedAt(now);
+            log.info("File {} already loaded (hash {}), load #{}", fileName, digest.hash(), f.getLoadCount());
+            return b;
+        });
+    }
+
+    private void registerFile(IngestionBatch batch, String fileName, FileDigest digest) {
+        if (batch.getStatus() == Status.FAILED) {
+            return; // a failed load may be retried with the same file and must then be parsed again
+        }
+        tx.executeWithoutResult(s -> {
+            SourceFile f = new SourceFile();
+            f.setContentHash(digest.hash());
+            f.setFileName(Texts.truncate(fileName, 500));
+            f.setFileSize(digest.size());
+            f.setProcessedBatchId(batch.getId());
+            f.setLastBatchId(batch.getId());
+            f.setFirstLoadedAt(batch.getStartedAt());
+            f.setLastLoadedAt(batch.getStartedAt());
+            files.save(f);
+            IngestionBatch b = batches.findById(batch.getId()).orElseThrow();
+            b.setSourceFileId(f.getId());
+            batch.setSourceFileId(f.getId());
+        });
+    }
+
+    private record FileDigest(String hash, long size) {
+    }
+
+    private static FileDigest digest(InputStreamSource source) throws IOException {
+        try (InputStream raw = source.getInputStream();
+             DigestInputStream in = new DigestInputStream(raw, MessageDigest.getInstance("SHA-256"))) {
+            byte[] buf = new byte[64 * 1024];
+            long size = 0;
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                size += n;
+            }
+            return new FileDigest(HexFormat.of().formatHex(in.getMessageDigest().digest()), size);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    // ------------------------------------------------------------------ batch lifecycle
 
     private String engine(String requested) {
         String e = Texts.isBlank(requested) ? props.ingestion().defaultSqlEngine() : requested.trim().toUpperCase(Locale.ROOT);
@@ -114,13 +236,13 @@ public class IngestionService {
         return tx.execute(s -> batches.save(b));
     }
 
-    private IngestionBatch finish(Loader loader, String extraMessage) {
+    private IngestionBatch finish(Loader loader) {
         loader.flush();
         int groupsAffected = grouping.recompute(loader.keys);
         IngestionBatch b = loader.batch;
         b.setGroupsAffected(groupsAffected);
         b.setStatus(b.getRowsRejected() > 0 ? Status.COMPLETED_WITH_ERRORS : Status.COMPLETED);
-        b.setMessage(Texts.truncate(join(loader.errors, extraMessage), 4000));
+        b.setMessage(Texts.truncate(join(loader.errors, summary(b)), 4000));
         b.setCompletedAt(LocalDateTime.now());
         return tx.execute(s -> batches.save(b));
     }
@@ -140,6 +262,11 @@ public class IngestionService {
         return tx.execute(s -> batches.save(b));
     }
 
+    private static String summary(IngestionBatch b) {
+        return b.getRowsDuplicate() == 0 ? null
+                : b.getRowsDuplicate() + " rows were already loaded and were not re-processed.";
+    }
+
     private static String join(List<String> errors, String extra) {
         List<String> all = new ArrayList<>();
         if (!Texts.isBlank(extra)) {
@@ -149,7 +276,7 @@ public class IngestionService {
         return all.isEmpty() ? null : String.join("\n", all);
     }
 
-    /** Buffers parsed rows and writes them in chunks. */
+    /** Buffers parsed rows; each chunk is split into known rows (sighting only) and new rows (processed). */
     private final class Loader implements LogRowSink {
 
         private static final int MAX_ERROR_LINES = 50;
@@ -157,6 +284,8 @@ public class IngestionService {
         final IngestionBatch batch;
         final Set<FingerprintKey> keys = new LinkedHashSet<>();
         final List<String> errors = new ArrayList<>();
+        /** row keys already handled in this load (new or sighted) - repeats inside one file are duplicates */
+        private final Set<String> handled = new HashSet<>();
         private final List<QueryLog> buffer = new ArrayList<>();
 
         Loader(IngestionBatch batch) {
@@ -175,8 +304,11 @@ public class IngestionService {
             }
             q.setBatchId(batch.getId());
             q.setSqlEngine(batch.getSqlEngine());
-            q.setCreatedAt(LocalDateTime.now());
-            grouping.applyFingerprint(q);
+            q.setRowKey(rowKeys.of(q));
+            if (!handled.add(q.getRowKey())) {
+                batch.setRowsDuplicate(batch.getRowsDuplicate() + 1);
+                return;
+            }
             buffer.add(q);
             if (buffer.size() >= props.ingestion().batchSize()) {
                 flush();
@@ -201,17 +333,51 @@ public class IngestionService {
             }
             List<QueryLog> chunk = new ArrayList<>(buffer);
             buffer.clear();
-            tx.executeWithoutResult(s -> {
-                logs.saveAll(chunk);
+            List<QueryLog> inserted = tx.execute(s -> {
+                LocalDateTime now = LocalDateTime.now();
+                Map<String, QueryLog> existing = logs.findByRowKeyIn(chunk.stream().map(QueryLog::getRowKey).toList())
+                        .stream().collect(Collectors.toMap(QueryLog::getRowKey, Function.identity()));
+                List<QueryLog> fresh = new ArrayList<>();
+                List<LogSighting> seen = new ArrayList<>();
+                for (QueryLog q : chunk) {
+                    QueryLog known = existing.get(q.getRowKey());
+                    if (known != null) {
+                        known.setSeenCount(known.getSeenCount() + 1);
+                        known.setLastSeenAt(now);
+                        known.setLastSeenBatchId(batch.getId());
+                        seen.add(sighting(known.getId(), now, false));
+                    } else {
+                        q.setCreatedAt(now);
+                        q.setLastSeenAt(now);
+                        q.setLastSeenBatchId(batch.getId());
+                        grouping.applyFingerprint(q);
+                        fresh.add(q);
+                    }
+                }
+                logs.saveAll(fresh);
+                em.flush();
+                fresh.forEach(q -> seen.add(sighting(q.getId(), now, true)));
+                sightings.saveAll(seen);
                 em.flush();
                 em.clear();
+                return fresh;
             });
-            batch.setRowsLoaded(batch.getRowsLoaded() + chunk.size());
-            for (QueryLog q : chunk) {
+            batch.setRowsLoaded(batch.getRowsLoaded() + inserted.size());
+            batch.setRowsDuplicate(batch.getRowsDuplicate() + chunk.size() - inserted.size());
+            for (QueryLog q : inserted) {
                 if (q.getFingerprint() != null) {
                     keys.add(new FingerprintKey(q.getSqlEngine(), q.getFingerprint()));
                 }
             }
+        }
+
+        private LogSighting sighting(Long logId, LocalDateTime now, boolean first) {
+            LogSighting s = new LogSighting();
+            s.setLogId(logId);
+            s.setBatchId(batch.getId());
+            s.setSeenAt(now);
+            s.setFirst(first);
+            return s;
         }
     }
 }
