@@ -1,99 +1,60 @@
-import { Component, OnInit, inject, input, signal } from '@angular/core';
+import { Component, inject, input } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
-import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { MatSortModule, Sort } from '@angular/material/sort';
-import { MatTableModule } from '@angular/material/table';
-import { MatTooltipModule } from '@angular/material/tooltip';
+import { AgGridAngular } from 'ag-grid-angular';
+import { ColDef, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryLog } from '../../core/models';
-import { MinutesPipe, TimestampPipe } from '../../shared/format';
+import { baseGridOptions, minutesFormatter, numCol, pagedDatasource, sqlCol, tsFormatter } from '../../shared/grid';
 import { LogDetailDialog } from '../logs/log-detail-dialog';
 
-/** Drill-down: the original log rows that make up a group (lazy, paged). */
+/** Drill-down: the original log rows that make up a group (server paged). */
 @Component({
   selector: 'app-group-members',
-  imports: [MatTableModule, MatPaginatorModule, MatSortModule, MatProgressBarModule, MatTooltipModule, MinutesPipe, TimestampPipe],
-  template: `
-    @if (loading()) {
-      <mat-progress-bar mode="indeterminate" />
-    }
-    <table mat-table [dataSource]="rows()" matSort (matSortChange)="onSort($event)" class="members">
-      <ng-container matColumnDef="seqId">
-        <th mat-header-cell *matHeaderCellDef mat-sort-header>Seq ID</th>
-        <td mat-cell *matCellDef="let r" class="num">{{ r.seqId }}</td>
-      </ng-container>
-      <ng-container matColumnDef="userId">
-        <th mat-header-cell *matHeaderCellDef mat-sort-header>User</th>
-        <td mat-cell *matCellDef="let r">{{ r.userId }}</td>
-      </ng-container>
-      <ng-container matColumnDef="startTime">
-        <th mat-header-cell *matHeaderCellDef mat-sort-header>Start time</th>
-        <td mat-cell *matCellDef="let r" class="nowrap">{{ r.startTime | ts }}</td>
-      </ng-container>
-      <ng-container matColumnDef="durationMinutes">
-        <th mat-header-cell *matHeaderCellDef mat-sort-header>Duration</th>
-        <td mat-cell *matCellDef="let r" class="num">{{ r.durationMinutes | minutes }}</td>
-      </ng-container>
-      <ng-container matColumnDef="error">
-        <th mat-header-cell *matHeaderCellDef>Error</th>
-        <td mat-cell *matCellDef="let r" class="nowrap">{{ r.errorCode }} {{ r.errorCategory ? '· ' + r.errorCategory : '' }}</td>
-      </ng-container>
-      <ng-container matColumnDef="executedQuery">
-        <th mat-header-cell *matHeaderCellDef>Executed query</th>
-        <td mat-cell *matCellDef="let r"><div class="cell-sql">{{ r.executedQuery || r.userQuery }}</div></td>
-      </ng-container>
-      <tr mat-header-row *matHeaderRowDef="cols"></tr>
-      <tr mat-row *matRowDef="let row; columns: cols" class="clickable" (click)="open(row)"></tr>
-    </table>
-    <mat-paginator [length]="total()" [pageSize]="size" [pageSizeOptions]="[10, 20, 50]" (page)="onPage($event)" />
-  `,
+  imports: [AgGridAngular],
+  template: `<ag-grid-angular
+    class="members-grid"
+    [style.height]="height()"
+    [gridOptions]="gridOptions"
+    [columnDefs]="columns"
+    (gridReady)="onReady($event)"
+    (rowClicked)="open($event)"
+  />`,
   styles: `
-    .members { background: transparent; }
+    .members-grid { display: block; width: 100%; }
   `,
 })
-export class GroupMembers implements OnInit {
+export class GroupMembers {
   readonly groupId = input.required<number>();
+  readonly height = input('420px');
   private readonly api = inject(Api);
   private readonly dialog = inject(MatDialog);
 
-  readonly cols = ['seqId', 'userId', 'startTime', 'durationMinutes', 'error', 'executedQuery'];
-  readonly rows = signal<QueryLog[]>([]);
-  readonly total = signal(0);
-  readonly loading = signal(false);
-  page = 0;
-  size = 10;
-  sort = '';
+  readonly gridOptions: GridOptions<QueryLog> = {
+    ...baseGridOptions,
+    rowModelType: 'infinite',
+    pagination: true,
+    paginationPageSize: 10,
+    paginationPageSizeSelector: [10, 20, 50],
+    cacheBlockSize: 50,
+  };
 
-  ngOnInit(): void {
-    this.load();
+  readonly columns: ColDef<QueryLog>[] = [
+    { field: 'seqId', headerName: 'Seq ID', sortable: true, width: 100, ...numCol },
+    { field: 'userId', headerName: 'User', sortable: true, width: 120 },
+    { field: 'startTime', headerName: 'Start time', sortable: true, width: 170, valueFormatter: tsFormatter },
+    { field: 'durationMinutes', headerName: 'Duration', sortable: true, width: 115, sort: 'desc', valueFormatter: minutesFormatter, ...numCol },
+    { headerName: 'Error', width: 200, valueGetter: (p) => [p.data?.errorCode, p.data?.errorCategory].filter(Boolean).join(' · ') },
+    { headerName: 'Executed query', valueGetter: (p) => p.data?.executedQuery || p.data?.userQuery, ...sqlCol, flex: 1, minWidth: 300 },
+  ];
+
+  onReady(e: GridReadyEvent<QueryLog>): void {
+    e.api.setGridOption(
+      'datasource',
+      pagedDatasource((page, size, sort) => this.api.groupLogs(this.groupId(), { page, size, sort })),
+    );
   }
 
-  load(): void {
-    this.loading.set(true);
-    this.api.groupLogs(this.groupId(), { page: this.page, size: this.size, sort: this.sort }).subscribe({
-      next: (p) => {
-        this.rows.set(p.content);
-        this.total.set(p.totalElements);
-        this.loading.set(false);
-      },
-      error: () => this.loading.set(false),
-    });
-  }
-
-  onSort(s: Sort): void {
-    this.sort = s.direction ? `${s.active},${s.direction}` : '';
-    this.page = 0;
-    this.load();
-  }
-
-  onPage(e: PageEvent): void {
-    this.page = e.pageIndex;
-    this.size = e.pageSize;
-    this.load();
-  }
-
-  open(row: QueryLog): void {
-    this.dialog.open(LogDetailDialog, { data: row, width: '960px', maxWidth: '95vw' });
+  open(e: RowClickedEvent<QueryLog>): void {
+    if (e.data) this.dialog.open(LogDetailDialog, { data: e.data, width: '960px', maxWidth: '95vw' });
   }
 }

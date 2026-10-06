@@ -2,7 +2,7 @@
   <div class="page-header">
     <div>
       <h1>Query Logs</h1>
-      <div class="subtitle">Every executed statement from imported files and database pulls</div>
+      <div class="subtitle">Every executed statement from imported files and database pulls · {{ total() }} rows</div>
     </div>
     <span class="spacer"></span>
     <button mat-flat-button (click)="importLogs()"><mat-icon>upload</mat-icon> Import logs</button>
@@ -39,71 +39,19 @@
       @if (filter.groupId) {
         <span class="muted">Group #{{ filter.groupId }}</span>
       }
+      @if (filter.batchId) {
+        <span class="muted">Import #{{ filter.batchId }}</span>
+      }
       <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
       <button mat-button type="button" (click)="reset()">Reset</button>
     </form>
 
-    @if (loading()) {
-      <mat-progress-bar mode="indeterminate" />
-    }
-    <div class="table-scroll">
-      <table mat-table [dataSource]="rows()" matSort matSortActive="startTime" matSortDirection="desc" (matSortChange)="onSort($event)">
-        <ng-container matColumnDef="seqId">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Seq ID</th>
-          <td mat-cell *matCellDef="let r" class="num">{{ r.seqId }}</td>
-        </ng-container>
-        <ng-container matColumnDef="startTime">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Start time</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">{{ r.startTime | ts }}</td>
-        </ng-container>
-        <ng-container matColumnDef="endTime">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>End time</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">{{ r.endTime | ts }}</td>
-        </ng-container>
-        <ng-container matColumnDef="durationMinutes">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Duration</th>
-          <td mat-cell *matCellDef="let r" class="num">{{ r.durationMinutes | minutes }}</td>
-        </ng-container>
-        <ng-container matColumnDef="userId">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>User</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">{{ r.userId }}</td>
-        </ng-container>
-        <ng-container matColumnDef="errorCode">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Error code</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">{{ r.errorCode }}</td>
-        </ng-container>
-        <ng-container matColumnDef="errorCategory">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Error category</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">{{ r.errorCategory }}</td>
-        </ng-container>
-        <ng-container matColumnDef="errorMessage">
-          <th mat-header-cell *matHeaderCellDef>Error message</th>
-          <td mat-cell *matCellDef="let r"><div class="cell-text" [matTooltip]="r.errorMessage">{{ r.errorMessage }}</div></td>
-        </ng-container>
-        <ng-container matColumnDef="executedQuery">
-          <th mat-header-cell *matHeaderCellDef>Executed query</th>
-          <td mat-cell *matCellDef="let r"><div class="cell-sql">{{ r.executedQuery || r.userQuery }}</div></td>
-        </ng-container>
-        <ng-container matColumnDef="groupId">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Group</th>
-          <td mat-cell *matCellDef="let r">
-            @if (r.groupId) {
-              <a [routerLink]="['/groups', r.groupId]" (click)="$event.stopPropagation()" matTooltip="Drill up to group">#{{ r.groupId }}</a>
-            }
-          </td>
-        </ng-container>
-        <tr mat-header-row *matHeaderRowDef="columns; sticky: true"></tr>
-        <tr mat-row *matRowDef="let row; columns: columns" class="clickable" (click)="open(row)"></tr>
-        <tr class="mat-row" *matNoDataRow>
-          <td [attr.colspan]="columns.length">
-            <div class="empty-state">
-              <mat-icon>inbox</mat-icon>
-              <p>No log rows match. Import a CSV / Excel file or pull from a data source.</p>
-            </div>
-          </td>
-        </tr>
-      </table>
-    </div>
-    <mat-paginator [length]="total()" [pageIndex]="pageIndex" [pageSize]="pageSize" [pageSizeOptions]="[25, 50, 100, 250]" (page)="onPage($event)" showFirstLastButtons />
+    <ag-grid-angular
+      class="grid"
+      [gridOptions]="gridOptions"
+      [columnDefs]="columns"
+      (gridReady)="onReady($event)"
+      (rowClicked)="open($event)"
+    />
   </div>
 </div>

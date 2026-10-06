@@ -7,13 +7,14 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { MatTableModule } from '@angular/material/table';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { AgGridAngular } from 'ag-grid-angular';
+import { ColDef, GridOptions } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { CustomEntityType, CustomField, DataSource, IngestionBatch, PromptTemplate } from '../../core/models';
 import { TimestampPipe } from '../../shared/format';
+import { LinkCell, StatusCell, baseGridOptions, numCol, tsFormatter } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 
 const SAMPLE_LOG_QUERY = `SELECT seq_id, executed_query, user_query, error_code, error_category, error_message,
@@ -25,9 +26,8 @@ const SAMPLE_LOG_QUERY = `SELECT seq_id, executed_query, user_query, error_code,
   selector: 'app-admin',
   imports: [
     FormsModule,
-    RouterLink,
     MatTabsModule,
-    MatTableModule,
+    AgGridAngular,
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
@@ -55,7 +55,41 @@ export class Admin {
   field: Partial<CustomField> = this.newField();
   prompt = { name: 'impala-default', sqlEngine: 'IMPALA', templateText: '', notes: '' };
 
-  readonly batchCols = ['id', 'sourceKind', 'sourceName', 'status', 'rowsLoaded', 'rowsRejected', 'groupsAffected', 'startedAt', 'createdBy'];
+  readonly batchGrid: GridOptions<IngestionBatch> = {
+    ...baseGridOptions,
+    rowClass: undefined,
+    pagination: true,
+    paginationPageSize: 20,
+    paginationPageSizeSelector: [20, 50, 100],
+  };
+  readonly batchCols: ColDef<IngestionBatch>[] = [
+    {
+      field: 'id',
+      headerName: 'Import',
+      width: 100,
+      sortable: true,
+      sort: 'desc',
+      cellRenderer: LinkCell,
+      cellRendererParams: {
+        link: () => ['/logs'],
+        query: (b: IngestionBatch) => ({ batchId: b.id }),
+        text: (b: IngestionBatch) => '#' + b.id,
+        tooltip: 'Show the rows of this import',
+      },
+    },
+    { field: 'sourceKind', headerName: 'Kind', width: 100, sortable: true },
+    { field: 'sourceName', headerName: 'Source', flex: 1, minWidth: 200, tooltip: (p) => p.data?.sourceName },
+    { field: 'sqlEngine', headerName: 'Engine', width: 100 },
+    { field: 'status', headerName: 'Status', width: 210, sortable: true, cellRenderer: StatusCell, tooltip: (p) => p.data?.message },
+    { field: 'rowsRead', headerName: 'Read', width: 95, sortable: true, ...numCol },
+    { field: 'rowsLoaded', headerName: 'Loaded', width: 100, sortable: true, ...numCol },
+    { field: 'rowsRejected', headerName: 'Rejected', width: 105, sortable: true, ...numCol },
+    { field: 'groupsAffected', headerName: 'Groups', width: 100, sortable: true, ...numCol },
+    { field: 'startedAt', headerName: 'Started', width: 170, sortable: true, valueFormatter: tsFormatter },
+    { field: 'completedAt', headerName: 'Completed', width: 170, valueFormatter: tsFormatter },
+    { field: 'createdBy', headerName: 'By', width: 130 },
+    { field: 'message', headerName: 'Message', width: 300, tooltip: (p) => p.data?.message },
+  ];
 
   constructor() {
     this.refresh();

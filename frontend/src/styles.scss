@@ -88,7 +88,8 @@ body {
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: center;
-  padding: 12px 16px 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--spt-border);
 
   mat-form-field {
     width: 190px;
@@ -96,46 +97,6 @@ body {
 
   .wide {
     width: 280px;
-  }
-}
-
-// ---------- data tables ----------
-.table-scroll {
-  overflow: auto;
-  max-height: calc(100vh - 260px);
-}
-
-table.mat-mdc-table {
-  background: transparent;
-  width: 100%;
-
-  th.mat-mdc-header-cell {
-    font-weight: 600;
-    white-space: nowrap;
-    background: var(--mat-sys-surface-container);
-  }
-
-  td.mat-mdc-cell,
-  th.mat-mdc-header-cell {
-    padding: 0 10px;
-  }
-
-  tr.mat-mdc-row.clickable {
-    cursor: pointer;
-  }
-
-  tr.mat-mdc-row:hover {
-    background: var(--spt-row-hover);
-  }
-
-  .num {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .nowrap {
-    white-space: nowrap;
   }
 }
 
@@ -257,4 +218,44 @@ a.link {
 // ---------- compact filter fields ----------
 .filters {
   @include mat.form-field-density(-4);
+}
+
+// ---------- AG Grid ----------
+.grid {
+  width: 100%;
+  height: calc(100vh - 290px);
+  min-height: 360px;
+}
+
+.ag-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  justify-content: flex-end;
+}
+
+.ag-sql {
+  font-family: var(--spt-mono);
+  font-size: 12px;
+}
+
+.ag-strong {
+  font-weight: 600;
+}
+
+.ag-good {
+  color: var(--spt-ok);
+  font-weight: 600;
+}
+
+.ag-bad {
+  color: var(--spt-bad);
+  font-weight: 600;
+}
+
+.grid-empty {
+  color: var(--spt-muted);
+}
+
+.ag-row.clickable {
+  cursor: pointer;
 }

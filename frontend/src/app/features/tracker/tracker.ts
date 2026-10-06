@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -6,28 +6,36 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatMenuModule } from '@angular/material/menu';
-import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatSelectModule } from '@angular/material/select';
-import { MatSortModule, Sort } from '@angular/material/sort';
-import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router, RouterLink } from '@angular/router';
+import { AgGridAngular } from 'ag-grid-angular';
+import { ColDef, ColumnState, GridApi, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
 import { Api, Params } from '../../core/api';
 import { CustomField, PRIORITIES, Tracker, WORKFLOW_STATUSES } from '../../core/models';
 import { downloadBlob, loadPref, savePref } from '../../core/prefs';
-import { MinutesPipe, TimestampPipe } from '../../shared/format';
-import { StatusChip } from '../../shared/status-chip';
+import {
+  LinkCell,
+  StatusCell,
+  baseGridOptions,
+  minutesFormatter,
+  numCol,
+  pagedDatasource,
+  pctFormatter,
+  secondsFormatter,
+  sqlCol,
+  tsFormatter,
+} from '../../shared/grid';
 import { TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
+
+const STATE_KEY = 'tracker.grid';
 
 @Component({
   selector: 'app-tracker',
   imports: [
     FormsModule,
     RouterLink,
-    MatTableModule,
-    MatPaginatorModule,
-    MatSortModule,
+    AgGridAngular,
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
@@ -36,48 +44,124 @@ import { TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
     MatIconModule,
     MatMenuModule,
     MatTooltipModule,
-    MatProgressBarModule,
-    MinutesPipe,
-    TimestampPipe,
-    StatusChip,
   ],
   templateUrl: './tracker.html',
   styleUrl: './tracker.scss',
 })
-export class TrackerList implements OnInit {
+export class TrackerList {
   private readonly api = inject(Api);
   private readonly router = inject(Router);
+  private grid?: GridApi<Tracker>;
 
   readonly statuses = WORKFLOW_STATUSES;
   readonly priorities = PRIORITIES;
-  readonly rows = signal<Tracker[]>([]);
   readonly total = signal(0);
-  readonly loading = signal(false);
-  readonly allColumns = signal<TrackerColumn[]>([]);
-  readonly visibleKeys = computed(() => ['open', ...this.allColumns().filter((c) => c.visible).map((c) => c.key)]);
-  readonly cell = cellValue;
+  /** columns offered in the chooser (standard + active custom fields) */
+  readonly chooser = signal<{ key: string; label: string; visible: boolean }[]>([]);
+  readonly columnDefs = signal<ColDef<Tracker>[]>([]);
 
   filter = { q: '', status: [] as string[], priority: '', theme: '', lead: '' };
-  pageIndex = 0;
-  pageSize = 25;
-  sort = '';
 
-  ngOnInit(): void {
-    const saved = loadPref<Record<string, boolean>>('tracker.columns', {});
-    const base = TRACKER_COLUMNS.map((c) => ({ ...c, visible: saved[c.key] ?? c.visible }));
-    this.allColumns.set(base);
-    this.api.customFields('TRACKER').subscribe((fields: CustomField[]) => {
-      const custom = fields
-        .filter((f) => f.active)
-        .map<TrackerColumn>((f) => ({
+  readonly gridOptions: GridOptions<Tracker> = {
+    ...baseGridOptions,
+    rowModelType: 'infinite',
+    pagination: true,
+    paginationPageSize: 25,
+    paginationPageSizeSelector: [25, 50, 100],
+    cacheBlockSize: 100,
+    maxBlocksInCache: 10,
+    onColumnMoved: () => this.saveState(),
+    onColumnResized: (e) => e.finished && this.saveState(),
+    onColumnVisible: () => this.saveState(),
+    onColumnPinned: () => this.saveState(),
+  };
+
+  private readonly sortMap: Record<string, string> = Object.fromEntries(
+    TRACKER_COLUMNS.filter((c) => c.sort).map((c) => [c.key, c.sort!]),
+  );
+
+  constructor() {
+    this.columnDefs.set(this.buildDefs([]));
+    this.api.customFields('TRACKER').subscribe((fields) => {
+      this.columnDefs.set(this.buildDefs(fields.filter((f) => f.active)));
+      // re-apply the saved layout once custom columns exist
+      setTimeout(() => this.restoreState());
+    });
+  }
+
+  private buildDefs(custom: CustomField[]): ColDef<Tracker>[] {
+    const defs: ColDef<Tracker>[] = [
+      {
+        colId: 'trackerId',
+        headerName: '#',
+        width: 80,
+        pinned: 'left',
+        lockPinned: true,
+        sortable: true,
+        valueGetter: (p) => p.data?.trackerId,
+        cellRenderer: LinkCell,
+        cellRendererParams: { link: (r: Tracker) => ['/tracker', r.trackerId], text: (r: Tracker) => 'T-' + r.trackerId },
+        cellClass: 'ag-sql',
+      },
+      ...TRACKER_COLUMNS.map((c) => this.toColDef(c)),
+      ...custom.map((f) =>
+        this.toColDef({
           key: 'cf:' + f.fieldKey,
           label: f.label,
           kind: f.dataType === 'NUMBER' ? 'num' : f.dataType === 'LONG_TEXT' ? 'longtext' : 'text',
-          visible: saved['cf:' + f.fieldKey] ?? true,
-        }));
-      this.allColumns.set([...base, ...custom]);
-    });
-    this.load();
+          visible: true,
+        }),
+      ),
+    ];
+    this.chooser.set(defs.filter((d) => d.colId !== 'trackerId').map((d) => ({ key: d.colId!, label: d.headerName!, visible: !d.hide })));
+    return defs;
+  }
+
+  private toColDef(c: TrackerColumn): ColDef<Tracker> {
+    const def: ColDef<Tracker> = {
+      colId: c.key,
+      headerName: c.label,
+      hide: !c.visible,
+      sortable: !!c.sort,
+      valueGetter: (p) => (p.data ? cellValue(p.data, c.key) : undefined),
+    };
+    switch (c.kind) {
+      case 'id':
+        return {
+          ...def,
+          width: 100,
+          pinned: 'left',
+          cellRenderer: LinkCell,
+          cellRendererParams: { link: (r: Tracker) => ['/groups', r.groupId], text: (r: Tracker) => '#' + r.groupId, tooltip: 'Drill down to group' },
+        };
+      case 'status':
+        return { ...def, width: 170, cellRenderer: StatusCell };
+      case 'minutes':
+        return { ...def, width: 130, valueFormatter: minutesFormatter, ...numCol };
+      case 'seconds':
+        return { ...def, width: 150, valueFormatter: secondsFormatter, ...numCol };
+      case 'pct':
+        return {
+          ...def,
+          width: 125,
+          valueFormatter: pctFormatter,
+          ...numCol,
+          cellClassRules:
+            c.key === 'improvementPct' ? { 'ag-good': (p) => p.value > 0, 'ag-bad': (p) => p.value < 0 } : undefined,
+        };
+      case 'num':
+        return { ...def, width: 120, ...numCol };
+      case 'sql':
+        return { ...def, ...sqlCol, width: 360 };
+      case 'mono':
+        return { ...def, width: 180, cellClass: 'ag-sql', tooltip: (p) => p.value };
+      case 'ts':
+        return { ...def, width: 170, valueFormatter: tsFormatter };
+      case 'longtext':
+        return { ...def, width: 260, tooltip: (p) => p.value };
+      default:
+        return { ...def, width: 170 };
+    }
   }
 
   private params(): Params {
@@ -85,21 +169,22 @@ export class TrackerList implements OnInit {
     return { q: f.q, status: f.status, priority: f.priority, theme: f.theme, lead: f.lead };
   }
 
-  load(): void {
-    this.loading.set(true);
-    this.api.trackers({ ...this.params(), page: this.pageIndex, size: this.pageSize, sort: this.sort }).subscribe({
-      next: (p) => {
-        this.rows.set(p.content);
-        this.total.set(p.totalElements);
-        this.loading.set(false);
-      },
-      error: () => this.loading.set(false),
-    });
+  onReady(e: GridReadyEvent<Tracker>): void {
+    this.grid = e.api;
+    this.restoreState();
+    e.api.setGridOption(
+      'datasource',
+      pagedDatasource(
+        (page, size, sort) => this.api.trackers({ ...this.params(), page, size, sort }),
+        this.sortMap,
+        (total) => this.total.set(total),
+      ),
+    );
   }
 
   search(): void {
-    this.pageIndex = 0;
-    this.load();
+    this.grid?.paginationGoToFirstPage();
+    this.grid?.purgeInfiniteCache();
   }
 
   reset(): void {
@@ -107,39 +192,51 @@ export class TrackerList implements OnInit {
     this.search();
   }
 
-  onSort(s: Sort): void {
-    const col = this.allColumns().find((c) => c.key === s.active);
-    this.sort = s.direction && col?.sort ? `${col.sort},${s.direction}` : '';
-    this.search();
-  }
+  // ---- column chooser & layout persistence
 
-  onPage(e: PageEvent): void {
-    this.pageIndex = e.pageIndex;
-    this.pageSize = e.pageSize;
-    this.load();
-  }
-
-  toggleColumn(col: TrackerColumn): void {
-    this.allColumns.update((cols) => cols.map((c) => (c.key === col.key ? { ...c, visible: !c.visible } : c)));
-    this.persistColumns();
+  toggleColumn(key: string, visible: boolean): void {
+    this.grid?.setColumnsVisible([key], visible);
+    this.syncChooser();
   }
 
   showColumns(mode: 'all' | 'default'): void {
-    this.allColumns.update((cols) =>
-      cols.map((c) => ({
-        ...c,
-        visible: mode === 'all' || c.key.startsWith('cf:') || (TRACKER_COLUMNS.find((d) => d.key === c.key)?.visible ?? true),
-      })),
+    if (!this.grid) return;
+    if (mode === 'default') {
+      try {
+        localStorage.removeItem('spt.' + STATE_KEY);
+      } catch {
+        /* ignore */
+      }
+      this.grid.resetColumnState();
+    } else {
+      this.grid.setColumnsVisible(this.chooser().map((c) => c.key), true);
+    }
+    this.syncChooser();
+  }
+
+  private syncChooser(): void {
+    const visible = new Map((this.grid?.getColumnState() ?? []).map((s) => [s.colId, !s.hide]));
+    this.chooser.update((cols) => cols.map((c) => ({ ...c, visible: visible.get(c.key) ?? c.visible })));
+  }
+
+  private saveState(): void {
+    if (!this.grid) return;
+    savePref(
+      STATE_KEY,
+      this.grid.getColumnState().map(({ colId, hide, width, pinned }) => ({ colId, hide, width, pinned })),
     );
-    this.persistColumns();
   }
 
-  private persistColumns(): void {
-    savePref('tracker.columns', Object.fromEntries(this.allColumns().map((c) => [c.key, c.visible])));
+  private restoreState(): void {
+    const state = loadPref<ColumnState[] | null>(STATE_KEY, null);
+    if (this.grid && state) {
+      this.grid.applyColumnState({ state, applyOrder: true });
+    }
+    this.syncChooser();
   }
 
-  open(row: Tracker): void {
-    this.router.navigate(['/tracker', row.trackerId]);
+  open(e: RowClickedEvent<Tracker>): void {
+    if (e.data) this.router.navigate(['/tracker', e.data.trackerId]);
   }
 
   exportXlsx(): void {

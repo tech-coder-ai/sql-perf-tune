@@ -2,7 +2,7 @@
   <div class="page-header">
     <div>
       <h1>Tuning Tracker</h1>
-      <div class="subtitle">Optimization work items · group metrics are live from the query groups</div>
+      <div class="subtitle">{{ total() }} work items · group metrics are live from the query groups · drag headers to reorder</div>
     </div>
     <span class="spacer"></span>
     <button mat-stroked-button [matMenuTriggerFor]="colMenu"><mat-icon>view_column</mat-icon> Columns</button>
@@ -12,12 +12,12 @@
 
   <mat-menu #colMenu="matMenu" class="col-menu">
     <div class="col-menu-actions" (click)="$event.stopPropagation()">
-      <button mat-button (click)="showColumns('default')">Default</button>
-      <button mat-button (click)="showColumns('all')">All</button>
+      <button mat-button (click)="showColumns('default')">Reset layout</button>
+      <button mat-button (click)="showColumns('all')">Show all</button>
     </div>
-    @for (c of allColumns(); track c.key) {
+    @for (c of chooser(); track c.key) {
       <div class="col-item" (click)="$event.stopPropagation()">
-        <mat-checkbox [checked]="c.visible" (change)="toggleColumn(c)">{{ c.label }}</mat-checkbox>
+        <mat-checkbox [checked]="c.visible" (change)="toggleColumn(c.key, $event.checked)">{{ c.label }}</mat-checkbox>
       </div>
     }
   </mat-menu>
@@ -58,75 +58,12 @@
       <button mat-button type="button" (click)="reset()">Reset</button>
     </form>
 
-    @if (loading()) {
-      <mat-progress-bar mode="indeterminate" />
-    }
-    <div class="table-scroll">
-      <table mat-table [dataSource]="rows()" matSort (matSortChange)="onSort($event)">
-        <ng-container matColumnDef="open" sticky>
-          <th mat-header-cell *matHeaderCellDef>#</th>
-          <td mat-cell *matCellDef="let r" class="nowrap">
-            <a [routerLink]="['/tracker', r.trackerId]" (click)="$event.stopPropagation()" class="mono">T-{{ r.trackerId }}</a>
-          </td>
-        </ng-container>
-
-        @for (c of allColumns(); track c.key) {
-          <ng-container [matColumnDef]="c.key">
-            <th mat-header-cell *matHeaderCellDef [mat-sort-header]="c.key" [disabled]="!c.sort" [class.num]="['num', 'minutes', 'seconds', 'pct'].includes(c.kind)">
-              {{ c.label }}
-            </th>
-            <td mat-cell *matCellDef="let r">
-              @let v = cell(r, c.key);
-              @switch (c.kind) {
-                @case ('id') {
-                  <a [routerLink]="['/groups', v]" (click)="$event.stopPropagation()" matTooltip="Drill down to group">#{{ v }}</a>
-                }
-                @case ('status') {
-                  <app-status [value]="$any(v)" />
-                }
-                @case ('minutes') {
-                  <span class="num-cell">{{ $any(v) | minutes }}</span>
-                }
-                @case ('seconds') {
-                  <span class="num-cell">{{ v === null || v === undefined ? '—' : v + ' s' }}</span>
-                }
-                @case ('pct') {
-                  <span class="num-cell" [class.good]="c.key === 'improvementPct' && $any(v) > 0" [class.bad]="c.key === 'improvementPct' && $any(v) < 0">
-                    {{ v === null || v === undefined ? '—' : v + ' %' }}
-                  </span>
-                }
-                @case ('num') {
-                  <span class="num-cell">{{ v ?? '—' }}</span>
-                }
-                @case ('sql') {
-                  <div class="cell-sql" [matTooltip]="$any(v)" matTooltipClass="sql-tip">{{ v }}</div>
-                }
-                @case ('mono') {
-                  <div class="cell-text mono" [matTooltip]="$any(v)">{{ v }}</div>
-                }
-                @case ('ts') {
-                  <span class="nowrap">{{ $any(v) | ts }}</span>
-                }
-                @default {
-                  <div class="cell-text" [matTooltip]="c.kind === 'longtext' ? $any(v) : ''">{{ v ?? '' }}</div>
-                }
-              }
-            </td>
-          </ng-container>
-        }
-
-        <tr mat-header-row *matHeaderRowDef="visibleKeys(); sticky: true"></tr>
-        <tr mat-row *matRowDef="let row; columns: visibleKeys()" class="clickable" (click)="open(row)"></tr>
-        <tr class="mat-row" *matNoDataRow>
-          <td [attr.colspan]="visibleKeys().length">
-            <div class="empty-state">
-              <mat-icon>fact_check</mat-icon>
-              <p>Nothing on the tracker yet. Select groups on the Query Groups screen and add them.</p>
-            </div>
-          </td>
-        </tr>
-      </table>
-    </div>
-    <mat-paginator [length]="total()" [pageIndex]="pageIndex" [pageSize]="pageSize" [pageSizeOptions]="[10, 25, 50, 100]" (page)="onPage($event)" showFirstLastButtons />
+    <ag-grid-angular
+      class="grid"
+      [gridOptions]="gridOptions"
+      [columnDefs]="columnDefs()"
+      (gridReady)="onReady($event)"
+      (rowClicked)="open($event)"
+    />
   </div>
 </div>

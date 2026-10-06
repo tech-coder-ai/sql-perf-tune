@@ -4,7 +4,7 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 **Cloudera Impala**.
 
 - **Spring Boot 4.1.1** (Java 21) REST service – `backend/`
-- **Angular 22 + Angular Material 3** UI with light / dark / system themes – `frontend/`
+- **Angular 22 + Angular Material 3 + AG Grid Community 36** UI with light / dark / system themes – `frontend/`
 - **Oracle** (shared environments) and **SQLite** (local development) schemas managed by Flyway
 - See [docs/architecture.md](docs/architecture.md) for the workflow mapping, data model, fingerprint rules
   and how to add columns.
@@ -17,7 +17,13 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 | Query Logs | Raw log rows (seq_id … duration_minutes) with filters; import CSV / Excel or pull from Oracle / Impala |
 | Query Groups | Same SQL minus WHERE filters grouped by fingerprint; expand a row to see its log rows; add groups to the tracker |
 | Group detail | Metrics, sample + normalized SQL, log rows, diagnostics (explain / profile / exec summary), DDL, optimization runs, feedback |
-| Tuning Tracker | All tracking columns, column chooser, filters, Excel export; edit page with change history and drill-down |
+| Tuning Tracker | All tracking columns, column chooser, drag-to-reorder / resize / pin (layout remembered per user), filters, Excel export; edit page with change history and drill-down |
+
+All grids use **AG Grid Community** (MIT, no license key): server-side paging and sorting via the infinite
+row model, expandable group rows via full-width detail rows, and a theme bound to the app's light/dark
+tokens (`frontend/src/app/shared/grid.ts`). Excel export is produced by the API (Apache POI), so no AG Grid
+Enterprise license is needed. If you later license Enterprise, master/detail, the column tool panel and
+the server-side row model can replace the custom pieces.
 | Administration | Data sources, runtime custom columns, versioned prompt templates, import history |
 
 ## Run locally
