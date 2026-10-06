@@ -1,0 +1,17 @@
+# Combine with "oracle": --spring.profiles.active=oracle,prod
+spt:
+  security:
+    mode: JWT
+  cors:
+    allowed-origins: ${SPT_CORS_ORIGINS}
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SPT_JWT_ISSUER_URI}
+
+springdoc:
+  api-docs:
+    enabled: ${SPT_API_DOCS_ENABLED:false}

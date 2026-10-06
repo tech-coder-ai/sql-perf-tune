@@ -1,0 +1,268 @@
+@if (group(); as g) {
+  <div class="page">
+    <div class="page-header">
+      <a mat-icon-button routerLink="/groups" aria-label="Back to groups"><mat-icon>arrow_back</mat-icon></a>
+      <div>
+        <h1>Group #{{ g.groupId }}</h1>
+        <div class="subtitle mono">{{ g.sqlEngine }} · fingerprint {{ g.fingerprint }}</div>
+      </div>
+      <span class="spacer"></span>
+      @if (g.trackerId) {
+        <app-status [value]="g.workflowStatus" />
+        <a mat-flat-button [routerLink]="['/tracker', g.trackerId]"><mat-icon>arrow_upward</mat-icon> Open tracker item</a>
+      } @else {
+        <button mat-flat-button (click)="track()"><mat-icon>playlist_add</mat-icon> Add to tracker</button>
+      }
+    </div>
+
+    <div class="kv-grid">
+      <div class="kv"><div class="k">Group size</div><div class="v">{{ g.groupSize }}</div></div>
+      <div class="kv"><div class="k">Distinct users</div><div class="v">{{ g.distinctUsers }}</div></div>
+      <div class="kv"><div class="k">Avg duration</div><div class="v">{{ g.avgDurationMinutes | minutes }}</div></div>
+      <div class="kv"><div class="k">Min / Max</div><div class="v">{{ g.minDurationMinutes | minutes }} / {{ g.maxDurationMinutes | minutes }}</div></div>
+      <div class="kv"><div class="k">Total duration</div><div class="v">{{ g.totalDurationMinutes | minutes }}</div></div>
+      <div class="kv"><div class="k">Errors</div><div class="v">{{ g.errorCount }}</div></div>
+      <div class="kv"><div class="k">First / last seen</div><div class="v small">{{ g.firstSeen | ts }}<br />{{ g.lastSeen | ts }}</div></div>
+      <div class="kv"><div class="k">Sample seq ID</div><div class="v">{{ g.sampleQuerySeqId ?? '—' }}</div></div>
+    </div>
+
+    <mat-tab-group class="tabs" animationDuration="0ms" mat-stretch-tabs="false">
+      <mat-tab label="Overview">
+        <div class="tab-body two-col">
+          <app-sql-block [text]="g.sampleQuery" label="Sample query (longest running)" maxHeight="420px" />
+          <app-sql-block [text]="g.normalizedQuery" label="Normalized (grouping key)" maxHeight="420px" />
+          <div class="span-all">
+            <div class="section-title">Users</div>
+            <p>{{ g.userIds || '—' }}</p>
+            <div class="section-title">Row indices (seq IDs)</div>
+            <p class="mono wrap">{{ g.rowIndices || '—' }}</p>
+          </div>
+        </div>
+      </mat-tab>
+
+      <mat-tab [label]="'Log rows (' + g.groupSize + ')'">
+        <div class="tab-body"><app-group-members [groupId]="g.groupId" /></div>
+      </mat-tab>
+
+      <mat-tab [label]="'Diagnostics (' + diagnostics().length + ')'">
+        <div class="tab-body">
+          <p class="muted">
+            Steps 4-6 and 10: store SQL Diagnostic Tool output for the original and the optimized SQL. A pasted Impala
+            profile is parsed automatically (timeline, execution / teardown time, exec summary) and the tracker metrics are updated.
+          </p>
+          <mat-accordion multi>
+            @for (d of diagnostics(); track d.id) {
+              <mat-expansion-panel>
+                <mat-expansion-panel-header>
+                  <mat-panel-title><app-status [value]="d.phase" />&nbsp;{{ d.phase === 'ORIGINAL' ? 'Original SQL' : 'Optimized SQL' }}</mat-panel-title>
+                  <mat-panel-description>
+                    {{ d.capturedAt | ts }} · {{ d.runDurationSeconds ?? '—' }}s · {{ d.rowCount ?? '—' }} rows · <app-status [value]="d.status" />
+                  </mat-panel-description>
+                </mat-expansion-panel-header>
+                <div class="two-col">
+                  <app-sql-block [text]="d.sqlText" label="SQL" />
+                  <app-sql-block [text]="d.explainPlan" label="Explain plan" />
+                  <app-sql-block [text]="d.execSummary" label="Execution summary" />
+                  <app-sql-block [text]="d.profileSummary" label="Parsed profile (LLM input)" />
+                </div>
+              </mat-expansion-panel>
+            }
+            <mat-expansion-panel [expanded]="diagnostics().length === 0">
+              <mat-expansion-panel-header><mat-panel-title><mat-icon>add</mat-icon>&nbsp;Capture diagnostics</mat-panel-title></mat-expansion-panel-header>
+              <form class="form-grid" (ngSubmit)="saveDiagnostic()">
+                <mat-form-field>
+                  <mat-label>Phase</mat-label>
+                  <mat-select name="phase" [(ngModel)]="diag.phase">
+                    <mat-option value="ORIGINAL">Original (bad SQL)</mat-option>
+                    <mat-option value="OPTIMIZED">Optimized (post run)</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>Status</mat-label>
+                  <mat-select name="status" [(ngModel)]="diag.status">
+                    <mat-option value="CAPTURED">Captured</mat-option>
+                    <mat-option value="FAILED">Failed</mat-option>
+                    <mat-option value="TIMEOUT">Timeout</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>Impala query ID</mat-label>
+                  <input matInput name="queryId" [(ngModel)]="diag.queryId" placeholder="parsed from profile if empty" />
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>Result row count</mat-label>
+                  <input matInput type="number" name="rowCount" [(ngModel)]="diag.rowCount" />
+                </mat-form-field>
+                <mat-form-field>
+                  <mat-label>Run duration (s)</mat-label>
+                  <input matInput type="number" name="runDurationSeconds" [(ngModel)]="diag.runDurationSeconds" placeholder="from profile if empty" />
+                </mat-form-field>
+                <mat-form-field class="span-all">
+                  <mat-label>SQL text</mat-label>
+                  <textarea matInput rows="3" name="sqlText" [(ngModel)]="diag.sqlText" placeholder="defaults to the sample query for the original phase"></textarea>
+                </mat-form-field>
+                <mat-form-field class="span-all">
+                  <mat-label>Explain plan</mat-label>
+                  <textarea matInput rows="4" name="explainPlan" class="mono" [(ngModel)]="diag.explainPlan"></textarea>
+                  <button mat-icon-button matSuffix type="button" (click)="explainFile.click()" matTooltip="Load from file"><mat-icon>attach_file</mat-icon></button>
+                </mat-form-field>
+                <input #explainFile type="file" hidden (change)="loadFile($event, 'explainPlan')" />
+                <mat-form-field class="span-all">
+                  <mat-label>Query profile (raw)</mat-label>
+                  <textarea matInput rows="5" name="profileRaw" class="mono" [(ngModel)]="diag.profileRaw"></textarea>
+                  <button mat-icon-button matSuffix type="button" (click)="profileFile.click()" matTooltip="Load from file"><mat-icon>attach_file</mat-icon></button>
+                </mat-form-field>
+                <input #profileFile type="file" hidden (change)="loadFile($event, 'profileRaw')" />
+                <mat-form-field class="span-all">
+                  <mat-label>Error message</mat-label>
+                  <input matInput name="errorMessage" [(ngModel)]="diag.errorMessage" />
+                </mat-form-field>
+                <div class="span-all actions">
+                  <button mat-flat-button type="submit" [disabled]="busy()"><mat-icon>save</mat-icon> Save diagnostics</button>
+                </div>
+              </form>
+            </mat-expansion-panel>
+          </mat-accordion>
+        </div>
+      </mat-tab>
+
+      <mat-tab [label]="'DDL (' + ddls().length + ')'">
+        <div class="tab-body">
+          <p class="muted">Step 8 input: DDL and row counts of every table the query reads.</p>
+          @for (d of ddls(); track d.id) {
+            <div class="ddl">
+              <div class="ddl-head">
+                <b>{{ d.tableName }}</b>
+                <span class="muted">{{ d.rowCount ?? '?' }} rows · {{ d.capturedAt | ts }}</span>
+                <span class="spacer"></span>
+                <button mat-icon-button (click)="deleteDdl(d)" aria-label="Remove DDL"><mat-icon>delete</mat-icon></button>
+              </div>
+              <app-sql-block [text]="d.ddlText" maxHeight="200px" />
+            </div>
+          }
+          <form class="form-grid add-ddl" (ngSubmit)="saveDdl()">
+            <mat-form-field>
+              <mat-label>Table name</mat-label>
+              <input matInput name="tableName" [(ngModel)]="ddl.tableName" required />
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Row count</mat-label>
+              <input matInput type="number" name="rowCount" [(ngModel)]="ddl.rowCount" />
+            </mat-form-field>
+            <mat-form-field class="span-all">
+              <mat-label>DDL (SHOW CREATE TABLE)</mat-label>
+              <textarea matInput rows="4" class="mono" name="ddlText" [(ngModel)]="ddl.ddlText"></textarea>
+            </mat-form-field>
+            <div class="span-all actions">
+              <button mat-stroked-button type="submit" [disabled]="!ddl.tableName"><mat-icon>add</mat-icon> Add table</button>
+            </div>
+          </form>
+        </div>
+      </mat-tab>
+
+      <mat-tab [label]="'Optimization (' + runs().length + ')'">
+        <div class="tab-body">
+          <div class="run-start">
+            <mat-form-field>
+              <mat-label>Prompt template</mat-label>
+              <mat-select [(ngModel)]="promptTemplateId">
+                <mat-option [value]="null">Active template for {{ g.sqlEngine }}</mat-option>
+                @for (p of prompts(); track p.id) {
+                  <mat-option [value]="p.id">{{ p.name }} v{{ p.versionNo }} {{ p.active ? '(active)' : '' }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <button mat-flat-button (click)="startRun()" [disabled]="busy()"><mat-icon>auto_awesome</mat-icon> Run optimization agent</button>
+            <span class="muted">Uses bad SQL, DDL, row counts, explain, parsed profile and exec summary.</span>
+          </div>
+          @for (r of runs(); track r.id) {
+            <div class="run panel">
+              <div class="run-head">
+                <b>Run #{{ r.id }}</b>
+                <app-status [value]="r.status" />
+                @if (r.outcome) {
+                  <app-status [value]="r.outcome" />
+                }
+                <span class="muted">{{ r.modelName }} · {{ r.requestedAt | ts }} · {{ r.requestedBy }}</span>
+              </div>
+              @if (r.errorMessage) {
+                <p class="error">{{ r.errorMessage }}</p>
+              }
+              <div class="two-col">
+                @if (r.changeNarrative || r.optimizedSql) {
+                  <app-sql-block [text]="r.changeNarrative" label="Change narrative" />
+                  <app-sql-block [text]="r.optimizedSql" label="Optimized SQL" />
+                }
+                <mat-expansion-panel class="span-all">
+                  <mat-expansion-panel-header><mat-panel-title>Rendered prompt</mat-panel-title></mat-expansion-panel-header>
+                  <app-sql-block [text]="r.promptText" label="Prompt" maxHeight="480px" />
+                </mat-expansion-panel>
+              </div>
+              @if (r.status !== 'COMPLETED') {
+                <div class="paste">
+                  <mat-form-field class="grow">
+                    <mat-label>Paste LLM response</mat-label>
+                    <textarea matInput rows="5" [(ngModel)]="responseFor(r).text"></textarea>
+                  </mat-form-field>
+                  <mat-form-field>
+                    <mat-label>Model</mat-label>
+                    <input matInput [(ngModel)]="responseFor(r).model" />
+                  </mat-form-field>
+                  <button mat-flat-button (click)="submitResponse(r)" [disabled]="!responseFor(r).text"><mat-icon>save</mat-icon> Store response</button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </mat-tab>
+
+      <mat-tab [label]="'Feedback (' + feedback().length + ')'">
+        <div class="tab-body">
+          <p class="muted">Step 12: business users and client developers record whether the optimized SQL was adopted. Rejections need a reason so prompts can be improved.</p>
+          @for (f of feedback(); track f.id) {
+            <div class="feedback">
+              <app-status [value]="f.decision === 'ADOPTED' ? 'ADOPTED' : f.decision === 'REJECTED' ? 'REJECTED' : 'NEW'" />
+              <b>{{ f.sourceRole.replace('_', ' ') }}</b>
+              <span class="muted">{{ f.createdBy }} · {{ f.createdAt | ts }} {{ f.optimizationRunId ? '· run #' + f.optimizationRunId : '' }}</span>
+              <p>{{ f.comments }}</p>
+            </div>
+          }
+          <form class="form-grid" (ngSubmit)="saveFeedback()">
+            <mat-form-field>
+              <mat-label>Role</mat-label>
+              <mat-select name="sourceRole" [(ngModel)]="fb.sourceRole">
+                @for (r of roles; track r) {
+                  <mat-option [value]="r">{{ r.replace('_', ' ') }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Decision</mat-label>
+              <mat-select name="decision" [(ngModel)]="fb.decision">
+                @for (d of decisions; track d) {
+                  <mat-option [value]="d">{{ d }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Optimization run</mat-label>
+              <mat-select name="optimizationRunId" [(ngModel)]="fb.optimizationRunId">
+                <mat-option [value]="null">—</mat-option>
+                @for (r of runs(); track r.id) {
+                  <mat-option [value]="r.id">Run #{{ r.id }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field class="span-all">
+              <mat-label>Comments</mat-label>
+              <textarea matInput rows="3" name="comments" [(ngModel)]="fb.comments"></textarea>
+            </mat-form-field>
+            <div class="span-all actions">
+              <button mat-flat-button type="submit"><mat-icon>send</mat-icon> Submit feedback</button>
+            </div>
+          </form>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+}

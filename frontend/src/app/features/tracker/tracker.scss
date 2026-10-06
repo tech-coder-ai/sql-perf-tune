@@ -1,0 +1,31 @@
+.num-cell {
+  display: block;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.good {
+  color: var(--spt-ok);
+  font-weight: 600;
+}
+
+.bad {
+  color: var(--spt-bad);
+  font-weight: 600;
+}
+
+.col-menu-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 8px;
+}
+
+.col-item {
+  padding: 0 12px;
+}
+
+td.mat-mdc-cell.mat-mdc-table-sticky,
+th.mat-mdc-header-cell.mat-mdc-table-sticky {
+  background: var(--spt-panel);
+}

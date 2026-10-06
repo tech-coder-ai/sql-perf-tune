@@ -1,0 +1,178 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Administration</h1>
+      <div class="subtitle">Log sources, extensible columns, optimization prompts and import history</div>
+    </div>
+  </div>
+
+  <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs">
+    <mat-tab label="Data sources">
+      <div class="tab-body cols">
+        <div>
+          @for (s of sources(); track s.id) {
+            <div class="item" [class.inactive]="!s.active">
+              <div class="item-head">
+                <b>{{ s.name }}</b>
+                <app-status [value]="s.sourceType" />
+                <span class="spacer"></span>
+                <button mat-button (click)="testDs(s)"><mat-icon>lan</mat-icon> Test</button>
+                <button mat-button (click)="editDs(s)"><mat-icon>edit</mat-icon> Edit</button>
+              </div>
+              <div class="mono muted">{{ s.jdbcUrl }}</div>
+              <div class="muted">Watermark: {{ s.lastWatermark | ts }}</div>
+            </div>
+          } @empty {
+            <p class="muted">No data sources yet.</p>
+          }
+        </div>
+        <form class="form-grid editor" (ngSubmit)="saveDs()">
+          <div class="span-all section-title">{{ ds.id ? 'Edit ' + ds.name : 'New data source' }}</div>
+          <mat-form-field><mat-label>Name</mat-label><input matInput name="name" [(ngModel)]="ds.name" required /></mat-form-field>
+          <mat-form-field>
+            <mat-label>Source type</mat-label>
+            <mat-select name="sourceType" [(ngModel)]="ds.sourceType">
+              <mat-option value="IMPALA">Impala</mat-option>
+              <mat-option value="ORACLE">Oracle</mat-option>
+              <mat-option value="GENERIC_JDBC">Generic JDBC</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field class="span-all"><mat-label>JDBC URL</mat-label><input matInput name="jdbcUrl" [(ngModel)]="ds.jdbcUrl" required placeholder="jdbc:impala://host:21050/default;AuthMech=1" /></mat-form-field>
+          <mat-form-field><mat-label>Driver class (optional)</mat-label><input matInput name="driverClass" [(ngModel)]="ds.driverClass" placeholder="com.cloudera.impala.jdbc.Driver" /></mat-form-field>
+          <mat-form-field><mat-label>Username</mat-label><input matInput name="username" [(ngModel)]="ds.username" /></mat-form-field>
+          <mat-form-field>
+            <mat-label>Password reference</mat-label>
+            <input matInput name="passwordRef" [(ngModel)]="ds.passwordRef" placeholder="IMPALA_LOG_PASSWORD" />
+            <mat-hint>Env var / property name, never the password</mat-hint>
+          </mat-form-field>
+          <mat-form-field><mat-label>Fetch size</mat-label><input matInput type="number" name="fetchSize" [(ngModel)]="ds.fetchSize" /></mat-form-field>
+          <mat-form-field class="span-all">
+            <mat-label>Log query</mat-label>
+            <textarea matInput rows="6" class="mono" name="logQuery" [(ngModel)]="ds.logQuery" required></textarea>
+            <mat-hint>Alias columns to the standard names; :since is bound to the last loaded start_time</mat-hint>
+          </mat-form-field>
+          <mat-checkbox name="active" [(ngModel)]="ds.active">Active</mat-checkbox>
+          <div class="span-all actions">
+            <button mat-button type="button" (click)="ds = newDs()">Clear</button>
+            <button mat-flat-button type="submit"><mat-icon>save</mat-icon> Save</button>
+          </div>
+        </form>
+      </div>
+    </mat-tab>
+
+    <mat-tab label="Custom columns">
+      <div class="tab-body cols">
+        <div>
+          <mat-form-field>
+            <mat-label>Screen</mat-label>
+            <mat-select [(ngModel)]="fieldEntity" (selectionChange)="loadFields(); field = newField()">
+              <mat-option value="TRACKER">Tuning tracker</mat-option>
+              <mat-option value="GROUP">Query groups</mat-option>
+              <mat-option value="LOG">Query logs</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <p class="muted">Columns added here appear on the screen and in the Excel export without a database change.</p>
+          @for (f of fields(); track f.id) {
+            <div class="item" [class.inactive]="!f.active">
+              <div class="item-head">
+                <b>{{ f.label }}</b>
+                <span class="mono muted">{{ f.fieldKey }}</span>
+                <app-status [value]="f.dataType" />
+                @if (f.required) {
+                  <span class="muted">required</span>
+                }
+                <span class="spacer"></span>
+                <button mat-button (click)="editField(f)"><mat-icon>edit</mat-icon> Edit</button>
+              </div>
+              @if (f.optionsCsv) {
+                <div class="muted">Options: {{ f.optionsCsv }}</div>
+              }
+            </div>
+          } @empty {
+            <p class="muted">No custom columns for this screen.</p>
+          }
+        </div>
+        <form class="form-grid editor" (ngSubmit)="saveField()">
+          <div class="span-all section-title">{{ field.id ? 'Edit ' + field.label : 'New column' }}</div>
+          <mat-form-field><mat-label>Label</mat-label><input matInput name="label" [(ngModel)]="field.label" required /></mat-form-field>
+          <mat-form-field>
+            <mat-label>Key</mat-label>
+            <input matInput name="fieldKey" [(ngModel)]="field.fieldKey" [disabled]="!!field.id" placeholder="derived from label" />
+          </mat-form-field>
+          <mat-form-field>
+            <mat-label>Data type</mat-label>
+            <mat-select name="dataType" [(ngModel)]="field.dataType" [disabled]="!!field.id">
+              @for (t of ['TEXT', 'LONG_TEXT', 'NUMBER', 'DATE', 'BOOLEAN', 'ENUM']; track t) {
+                <mat-option [value]="t">{{ t }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field><mat-label>Display order</mat-label><input matInput type="number" name="displayOrder" [(ngModel)]="field.displayOrder" /></mat-form-field>
+          @if (field.dataType === 'ENUM') {
+            <mat-form-field class="span-all"><mat-label>Options (comma separated)</mat-label><input matInput name="optionsCsv" [(ngModel)]="field.optionsCsv" required /></mat-form-field>
+          }
+          <mat-checkbox name="required" [(ngModel)]="field.required">Required</mat-checkbox>
+          <mat-checkbox name="active" [(ngModel)]="field.active">Active</mat-checkbox>
+          <div class="span-all actions">
+            <button mat-button type="button" (click)="field = newField()">Clear</button>
+            <button mat-flat-button type="submit"><mat-icon>save</mat-icon> Save</button>
+          </div>
+        </form>
+      </div>
+    </mat-tab>
+
+    <mat-tab label="Prompt templates">
+      <div class="tab-body cols">
+        <div>
+          <p class="muted">Step 7: saving creates a new version and makes it active, so earlier optimization runs stay reproducible.</p>
+          @for (p of prompts(); track p.id) {
+            <div class="item" [class.inactive]="!p.active">
+              <div class="item-head">
+                <b>{{ p.name }} v{{ p.versionNo }}</b>
+                <app-status [value]="p.active ? 'ADOPTED' : 'ON_HOLD'" />
+                <span class="muted">{{ p.sqlEngine }} · {{ p.createdBy }} · {{ p.createdAt | ts }}</span>
+                <span class="spacer"></span>
+                <button mat-button (click)="editPrompt(p)"><mat-icon>edit</mat-icon> Edit</button>
+                @if (!p.active) {
+                  <button mat-button (click)="activate(p)"><mat-icon>check_circle</mat-icon> Activate</button>
+                }
+              </div>
+              @if (p.notes) {
+                <div class="muted">{{ p.notes }}</div>
+              }
+            </div>
+          }
+        </div>
+        <form class="form-grid editor" (ngSubmit)="savePrompt()">
+          <mat-form-field><mat-label>Name</mat-label><input matInput name="name" [(ngModel)]="prompt.name" required /></mat-form-field>
+          <mat-form-field><mat-label>Engine</mat-label><input matInput name="sqlEngine" [(ngModel)]="prompt.sqlEngine" /></mat-form-field>
+          <mat-form-field class="span-all">
+            <mat-label>Template</mat-label>
+            <textarea matInput rows="16" class="mono" name="templateText" [(ngModel)]="prompt.templateText" required></textarea>
+            <mat-hint>Placeholders: {{ '{{bad_sql}} {{ddl}} {{row_counts}} {{explain}} {{profile_summary}} {{exec_summary}} {{result_row_count}}' }}</mat-hint>
+          </mat-form-field>
+          <mat-form-field class="span-all"><mat-label>Change notes</mat-label><input matInput name="notes" [(ngModel)]="prompt.notes" /></mat-form-field>
+          <div class="span-all actions"><button mat-flat-button type="submit"><mat-icon>save</mat-icon> Save new version</button></div>
+        </form>
+      </div>
+    </mat-tab>
+
+    <mat-tab label="Import history">
+      <div class="tab-body">
+        <table mat-table [dataSource]="batches()">
+          <ng-container matColumnDef="id"><th mat-header-cell *matHeaderCellDef>Batch</th><td mat-cell *matCellDef="let b"><a routerLink="/logs" [queryParams]="{ batchId: b.id }">#{{ b.id }}</a></td></ng-container>
+          <ng-container matColumnDef="sourceKind"><th mat-header-cell *matHeaderCellDef>Kind</th><td mat-cell *matCellDef="let b">{{ b.sourceKind }}</td></ng-container>
+          <ng-container matColumnDef="sourceName"><th mat-header-cell *matHeaderCellDef>Source</th><td mat-cell *matCellDef="let b"><div class="cell-text">{{ b.sourceName }}</div></td></ng-container>
+          <ng-container matColumnDef="status"><th mat-header-cell *matHeaderCellDef>Status</th><td mat-cell *matCellDef="let b"><app-status [value]="b.status" [matTooltip]="b.message" /></td></ng-container>
+          <ng-container matColumnDef="rowsLoaded"><th mat-header-cell *matHeaderCellDef class="num">Loaded</th><td mat-cell *matCellDef="let b" class="num">{{ b.rowsLoaded }}</td></ng-container>
+          <ng-container matColumnDef="rowsRejected"><th mat-header-cell *matHeaderCellDef class="num">Rejected</th><td mat-cell *matCellDef="let b" class="num">{{ b.rowsRejected }}</td></ng-container>
+          <ng-container matColumnDef="groupsAffected"><th mat-header-cell *matHeaderCellDef class="num">Groups</th><td mat-cell *matCellDef="let b" class="num">{{ b.groupsAffected }}</td></ng-container>
+          <ng-container matColumnDef="startedAt"><th mat-header-cell *matHeaderCellDef>Started</th><td mat-cell *matCellDef="let b" class="nowrap">{{ b.startedAt | ts }}</td></ng-container>
+          <ng-container matColumnDef="createdBy"><th mat-header-cell *matHeaderCellDef>By</th><td mat-cell *matCellDef="let b">{{ b.createdBy }}</td></ng-container>
+          <tr mat-header-row *matHeaderRowDef="batchCols"></tr>
+          <tr mat-row *matRowDef="let row; columns: batchCols"></tr>
+        </table>
+      </div>
+    </mat-tab>
+  </mat-tab-group>
+</div>

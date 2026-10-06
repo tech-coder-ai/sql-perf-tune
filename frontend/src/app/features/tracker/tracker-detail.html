@@ -1,0 +1,192 @@
+@if (model(); as m) {
+  <div class="page">
+    <div class="page-header">
+      <a mat-icon-button routerLink="/tracker" aria-label="Back to tracker"><mat-icon>arrow_back</mat-icon></a>
+      <div>
+        <h1>T-{{ m.trackerId }} · Group #{{ m.groupId }}</h1>
+        <div class="subtitle">
+          Updated {{ saved()?.updatedAt | ts }} by {{ saved()?.updatedBy || saved()?.createdBy || '—' }} · version {{ m.version }}
+        </div>
+      </div>
+      <app-status [value]="saved()?.workflowStatus" />
+      <app-status [value]="saved()?.priority" />
+      <span class="spacer"></span>
+      <a mat-stroked-button [routerLink]="['/groups', m.groupId]"><mat-icon>arrow_downward</mat-icon> Group workflow</a>
+      <a mat-stroked-button routerLink="/logs" [queryParams]="{ groupId: m.groupId }"><mat-icon>receipt_long</mat-icon> Log rows</a>
+    </div>
+
+    <div class="kv-grid">
+      <div class="kv"><div class="k">Group size</div><div class="v">{{ m.groupSize }}</div></div>
+      <div class="kv"><div class="k">Distinct users</div><div class="v">{{ m.distinctUsers }}</div></div>
+      <div class="kv"><div class="k">Avg / Min / Max</div><div class="v">{{ m.avgDurationMinutes | minutes }} · {{ m.minDurationMinutes | minutes }} · {{ m.maxDurationMinutes | minutes }}</div></div>
+      <div class="kv"><div class="k">Total duration</div><div class="v">{{ m.totalDurationMinutes | minutes }}</div></div>
+      <div class="kv"><div class="k">Run time improvement</div><div class="v" [class.good]="(saved()?.improvementPct ?? 0) > 0">{{ saved()?.improvementPct ?? '—' }}{{ saved()?.improvementPct !== null ? ' %' : '' }}</div></div>
+      <div class="kv"><div class="k">Sample seq ID</div><div class="v">{{ m.sampleQuerySeqId ?? '—' }}</div></div>
+    </div>
+
+    <form #f="ngForm" (ngSubmit)="save(f)">
+      <div class="save-bar" [class.dirty]="f.dirty">
+        <span>{{ f.dirty ? 'Unsaved changes' : 'All changes saved' }}</span>
+        <span class="spacer"></span>
+        <button mat-button type="button" (click)="discard(f)" [disabled]="!f.dirty">Discard</button>
+        <button mat-flat-button type="submit" [disabled]="!f.dirty || f.invalid || saving()"><mat-icon>save</mat-icon> Save</button>
+      </div>
+
+      <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs">
+        <mat-tab label="Tracking">
+          <div class="tab-body">
+            <div class="section-title">Workflow & ownership</div>
+            <div class="form-grid">
+              <mat-form-field>
+                <mat-label>Workflow status</mat-label>
+                <mat-select name="workflowStatus" [(ngModel)]="m.workflowStatus">
+                  @for (s of statuses; track s) {
+                    <mat-option [value]="s">{{ s.replaceAll('_', ' ') }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+              <mat-form-field>
+                <mat-label>Priority</mat-label>
+                <mat-select name="priority" [(ngModel)]="m.priority">
+                  @for (p of priorities; track p) {
+                    <mat-option [value]="p">{{ p }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+              <mat-form-field><mat-label>Theme</mat-label><input matInput name="theme" [(ngModel)]="m.theme" /></mat-form-field>
+              <mat-form-field><mat-label>Dev team lead</mat-label><input matInput name="devTeamLead" [(ngModel)]="m.devTeamLead" /></mat-form-field>
+              <mat-form-field><mat-label>Dev team status</mat-label><input matInput name="devTeamStatus" [(ngModel)]="m.devTeamStatus" /></mat-form-field>
+              <mat-form-field><mat-label>Cloudera team lead</mat-label><input matInput name="clouderaTeamLead" [(ngModel)]="m.clouderaTeamLead" /></mat-form-field>
+              <mat-form-field><mat-label>SME team lead</mat-label><input matInput name="smeTeamLead" [(ngModel)]="m.smeTeamLead" /></mat-form-field>
+              <mat-form-field><mat-label>Optimized SQL (status)</mat-label><input matInput name="optimizedSqlStatus" [(ngModel)]="m.optimizedSqlStatus" /></mat-form-field>
+              <mat-form-field><mat-label>Cloudera post-run validation</mat-label><input matInput name="clouderaPostRunValidation" [(ngModel)]="m.clouderaPostRunValidation" /></mat-form-field>
+              <mat-form-field><mat-label>SME validation</mat-label><input matInput name="smeValidation" [(ngModel)]="m.smeValidation" /></mat-form-field>
+              <mat-form-field><mat-label>Install</mat-label><input matInput name="installStatus" [(ngModel)]="m.installStatus" /></mat-form-field>
+              <mat-form-field><mat-label>Execute</mat-label><input matInput name="executeStatus" [(ngModel)]="m.executeStatus" /></mat-form-field>
+              <mat-form-field><mat-label>Validation</mat-label><input matInput name="validationStatus" [(ngModel)]="m.validationStatus" /></mat-form-field>
+            </div>
+
+            <div class="section-title">Before / after metrics</div>
+            <div class="form-grid">
+              <mat-form-field><mat-label>OG run duration (min)</mat-label><input matInput type="number" min="0" name="ogRunDurationMinutes" [(ngModel)]="m.ogRunDurationMinutes" /></mat-form-field>
+              <mat-form-field><mat-label>Post-run duration (min)</mat-label><input matInput type="number" min="0" name="postRunDurationMinutes" [(ngModel)]="m.postRunDurationMinutes" /></mat-form-field>
+              <mat-form-field><mat-label>OG execution time (s)</mat-label><input matInput type="number" min="0" name="ogExecutionTimeSeconds" [(ngModel)]="m.ogExecutionTimeSeconds" /></mat-form-field>
+              <mat-form-field><mat-label>Post-run execution time (s)</mat-label><input matInput type="number" min="0" name="postRunExecutionTimeSeconds" [(ngModel)]="m.postRunExecutionTimeSeconds" /></mat-form-field>
+              <mat-form-field><mat-label>OG teardown time (s)</mat-label><input matInput type="number" min="0" name="ogTeardownTimeSeconds" [(ngModel)]="m.ogTeardownTimeSeconds" /></mat-form-field>
+              <mat-form-field><mat-label>Post-run teardown time (s)</mat-label><input matInput type="number" min="0" name="postRunTeardownTimeSeconds" [(ngModel)]="m.postRunTeardownTimeSeconds" /></mat-form-field>
+              <mat-form-field>
+                <mat-label>OG teardown %</mat-label>
+                <input matInput type="number" min="0" name="ogTeardownPct" [(ngModel)]="m.ogTeardownPct" />
+                <mat-hint>Leave empty to derive from teardown / run duration</mat-hint>
+              </mat-form-field>
+              <mat-form-field>
+                <mat-label>Post-run teardown %</mat-label>
+                <input matInput type="number" min="0" name="postRunTeardownPct" [(ngModel)]="m.postRunTeardownPct" />
+              </mat-form-field>
+            </div>
+
+            <div class="section-title">Analysis</div>
+            <div class="form-grid">
+              <mat-form-field class="span-all"><mat-label>Problem</mat-label><textarea matInput rows="3" name="problem" [(ngModel)]="m.problem"></textarea></mat-form-field>
+              <mat-form-field class="span-all"><mat-label>Changes</mat-label><textarea matInput rows="4" name="changes" [(ngModel)]="m.changes"></textarea></mat-form-field>
+              <mat-form-field class="span-all"><mat-label>Recommendations</mat-label><textarea matInput rows="3" name="recommendations" [(ngModel)]="m.recommendations"></textarea></mat-form-field>
+            </div>
+
+            @if (customFields().length) {
+              <div class="section-title">Additional fields</div>
+              <div class="form-grid">
+                @for (cf of customFields(); track cf.id) {
+                  @switch (cf.dataType) {
+                    @case ('ENUM') {
+                      <mat-form-field>
+                        <mat-label>{{ cf.label }}</mat-label>
+                        <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
+                          <mat-option [value]="''">—</mat-option>
+                          @for (o of options(cf); track o) {
+                            <mat-option [value]="o">{{ o }}</mat-option>
+                          }
+                        </mat-select>
+                      </mat-form-field>
+                    }
+                    @case ('BOOLEAN') {
+                      <mat-form-field>
+                        <mat-label>{{ cf.label }}</mat-label>
+                        <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
+                          <mat-option [value]="''">—</mat-option>
+                          <mat-option value="true">Yes</mat-option>
+                          <mat-option value="false">No</mat-option>
+                        </mat-select>
+                      </mat-form-field>
+                    }
+                    @case ('LONG_TEXT') {
+                      <mat-form-field class="span-all">
+                        <mat-label>{{ cf.label }}</mat-label>
+                        <textarea matInput rows="3" [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required"></textarea>
+                      </mat-form-field>
+                    }
+                    @default {
+                      <mat-form-field>
+                        <mat-label>{{ cf.label }}</mat-label>
+                        <input
+                          matInput
+                          [type]="cf.dataType === 'NUMBER' ? 'number' : cf.dataType === 'DATE' ? 'date' : 'text'"
+                          [name]="'cf_' + cf.fieldKey"
+                          [(ngModel)]="m.customFields[cf.fieldKey]"
+                          [required]="cf.required"
+                        />
+                      </mat-form-field>
+                    }
+                  }
+                }
+              </div>
+            }
+          </div>
+        </mat-tab>
+
+        <mat-tab label="Queries">
+          <div class="tab-body two-col">
+            <app-sql-block [text]="m.sampleQueryRaw" label="Sample query (raw)" />
+            <app-sql-block [text]="m.optimizedQuery" label="Optimized query" />
+            <mat-form-field class="span-all">
+              <mat-label>Sample query (formatted)</mat-label>
+              <textarea matInput rows="10" class="mono" name="sampleQueryFormatted" [(ngModel)]="m.sampleQueryFormatted"></textarea>
+            </mat-form-field>
+            <mat-form-field class="span-all">
+              <mat-label>Cleansed query</mat-label>
+              <textarea matInput rows="5" class="mono" name="cleansedQuery" [(ngModel)]="m.cleansedQuery"></textarea>
+            </mat-form-field>
+            <mat-form-field class="span-all">
+              <mat-label>Optimized query</mat-label>
+              <textarea matInput rows="8" class="mono" name="optimizedQuery" [(ngModel)]="m.optimizedQuery"></textarea>
+            </mat-form-field>
+            <div class="span-all muted mono">fingerprint {{ m.fingerprint }} · row indices {{ m.rowIndices }}</div>
+          </div>
+        </mat-tab>
+
+        <mat-tab [label]="'Log rows (' + m.groupSize + ')'">
+          <div class="tab-body"><app-group-members [groupId]="m.groupId" /></div>
+        </mat-tab>
+
+        <mat-tab [label]="'History (' + history().length + ')'">
+          <div class="tab-body">
+            @for (h of history(); track h.id) {
+              <div class="history-item">
+                <div class="who"><b>{{ h.changedBy }}</b> <span class="muted">{{ h.changedAt | ts }}</span></div>
+                @if (h.action === 'CREATE') {
+                  <div>Added to tracker</div>
+                } @else {
+                  <div>
+                    <b>{{ fieldLabel(h.fieldName) }}</b>:
+                    <span class="old">{{ h.oldValue ?? '∅' }}</span> → <span class="new">{{ h.newValue ?? '∅' }}</span>
+                  </div>
+                }
+              </div>
+            } @empty {
+              <p class="muted">No changes recorded.</p>
+            }
+          </div>
+        </mat-tab>
+      </mat-tab-group>
+    </form>
+  </div>
+}

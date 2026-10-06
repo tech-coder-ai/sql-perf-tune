@@ -1,0 +1,15 @@
+# Oracle 19c+ (identity columns). Credentials come from the environment, never from this file.
+spring:
+  datasource:
+    url: ${SPT_DB_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
+    username: ${SPT_DB_USER:SPT_APP}
+    password: ${SPT_DB_PASSWORD:}
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      maximum-pool-size: ${SPT_DB_POOL_SIZE:20}
+  jpa:
+    database-platform: org.hibernate.dialect.OracleDialect
+  flyway:
+    locations: classpath:db/migration/oracle
+    # set to the schema owner if the app user differs from the owner
+    schemas: ${SPT_DB_SCHEMA:}

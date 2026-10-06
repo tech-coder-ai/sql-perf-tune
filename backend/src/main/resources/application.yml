@@ -1,0 +1,66 @@
+# Default profile = local development on SQLite (file ./data/sql-perf-tune.db).
+# Activate "oracle" for shared environments:  --spring.profiles.active=oracle
+spring:
+  application:
+    name: sql-perf-tune
+  datasource:
+    url: jdbc:sqlite:${SPT_SQLITE_PATH:./data/sql-perf-tune.db}?foreign_keys=on&busy_timeout=10000&journal_mode=WAL&date_class=TEXT&date_string_format=yyyy-MM-dd HH:mm:ss.SSS
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite allows a single writer; one pooled connection avoids SQLITE_BUSY under concurrent requests.
+      maximum-pool-size: 1
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none   # Flyway owns the schema
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    properties:
+      hibernate:
+        jdbc.batch_size: 100
+        order_inserts: true
+  flyway:
+    locations: classpath:db/migration/sqlite
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,flyway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+spt:
+  security:
+    mode: NONE
+  fingerprint:
+    strip-where-clause: true
+    mask-literals: true
+    prefer-user-query: false
+  ingestion:
+    batch-size: 500
+    max-rejected-rows: 1000
+    default-sql-engine: IMPALA
+    jdbc-query-timeout-seconds: 600
+  cors:
+    allowed-origins: http://localhost:4200
+
+logging:
+  level:
+    com.techcoder.sqlperf: INFO

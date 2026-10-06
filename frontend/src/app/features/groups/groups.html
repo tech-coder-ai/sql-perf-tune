@@ -1,0 +1,152 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Query Groups</h1>
+      <div class="subtitle">Same SQL with different WHERE filters, grouped by fingerprint. Expand a row to see its log rows.</div>
+    </div>
+    <span class="spacer"></span>
+    <button mat-stroked-button (click)="rebuild()" matTooltip="Re-fingerprint all logs (after changing fingerprint settings)">
+      <mat-icon>refresh</mat-icon> Rebuild
+    </button>
+    <button mat-flat-button [disabled]="selection.isEmpty()" (click)="track(selection.selected)">
+      <mat-icon>playlist_add</mat-icon> Add {{ selection.selected.length || '' }} to tracker
+    </button>
+  </div>
+
+  <div class="panel">
+    <form class="filters" (ngSubmit)="search()">
+      <mat-form-field class="wide">
+        <mat-label>SQL contains</mat-label>
+        <input matInput name="q" [(ngModel)]="filter.q" />
+        <mat-icon matSuffix>search</mat-icon>
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>User</mat-label>
+        <input matInput name="userId" [(ngModel)]="filter.userId" />
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>Min group size</mat-label>
+        <input matInput type="number" min="1" name="minGroupSize" [(ngModel)]="filter.minGroupSize" />
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>Min avg duration (min)</mat-label>
+        <input matInput type="number" min="0" name="minAvgDuration" [(ngModel)]="filter.minAvgDuration" />
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>Tracked</mat-label>
+        <mat-select name="tracked" [(ngModel)]="filter.tracked">
+          <mat-option value="">All</mat-option>
+          <mat-option value="true">On tracker</mat-option>
+          <mat-option value="false">Not tracked</mat-option>
+        </mat-select>
+      </mat-form-field>
+      <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
+    </form>
+
+    @if (loading()) {
+      <mat-progress-bar mode="indeterminate" />
+    }
+    <div class="table-scroll">
+      <table mat-table [dataSource]="rows()" multiTemplateDataRows matSort matSortActive="totalDurationMinutes" matSortDirection="desc" (matSortChange)="onSort($event)">
+        <ng-container matColumnDef="select">
+          <th mat-header-cell *matHeaderCellDef>
+            <mat-checkbox [checked]="allSelected()" [indeterminate]="!selection.isEmpty() && !allSelected()" (change)="toggleAll()" aria-label="Select page" />
+          </th>
+          <td mat-cell *matCellDef="let r">
+            <mat-checkbox [checked]="selection.isSelected(r.groupId)" (click)="$event.stopPropagation()" (change)="selection.toggle(r.groupId)" aria-label="Select group" />
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="expand">
+          <th mat-header-cell *matHeaderCellDef></th>
+          <td mat-cell *matCellDef="let r">
+            <button mat-icon-button (click)="toggle(r); $event.stopPropagation()" [attr.aria-expanded]="expanded() === r.groupId" aria-label="Show group rows">
+              <mat-icon>{{ expanded() === r.groupId ? 'expand_less' : 'expand_more' }}</mat-icon>
+            </button>
+          </td>
+        </ng-container>
+        <ng-container matColumnDef="groupId">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="id">Group ID</th>
+          <td mat-cell *matCellDef="let r"><a [routerLink]="['/groups', r.groupId]" (click)="$event.stopPropagation()">#{{ r.groupId }}</a></td>
+        </ng-container>
+        <ng-container matColumnDef="groupSize">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Group size</th>
+          <td mat-cell *matCellDef="let r" class="num">{{ r.groupSize }}</td>
+        </ng-container>
+        <ng-container matColumnDef="userIds">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="distinctUsers">User ID(s)</th>
+          <td mat-cell *matCellDef="let r"><div class="cell-text" [matTooltip]="r.userIds">{{ r.distinctUsers }} · {{ r.userIds }}</div></td>
+        </ng-container>
+        <ng-container matColumnDef="durationCount">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Duration count</th>
+          <td mat-cell *matCellDef="let r" class="num">{{ r.durationCount }}</td>
+        </ng-container>
+        <ng-container matColumnDef="avgDurationMinutes">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Avg</th>
+          <td mat-cell *matCellDef="let r" class="num">{{ r.avgDurationMinutes | minutes }}</td>
+        </ng-container>
+        <ng-container matColumnDef="minDurationMinutes">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Min</th>
+          <td mat-cell *matCellDef="let r" class="num">{{ r.minDurationMinutes | minutes }}</td>
+        </ng-container>
+        <ng-container matColumnDef="maxDurationMinutes">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Max</th>
+          <td mat-cell *matCellDef="let r" class="num">{{ r.maxDurationMinutes | minutes }}</td>
+        </ng-container>
+        <ng-container matColumnDef="totalDurationMinutes">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Total</th>
+          <td mat-cell *matCellDef="let r" class="num strong">{{ r.totalDurationMinutes | minutes }}</td>
+        </ng-container>
+        <ng-container matColumnDef="sampleQuery">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header="sampleQuerySeqId">Sample query</th>
+          <td mat-cell *matCellDef="let r"><div class="cell-sql">{{ r.sampleQuery }}</div></td>
+        </ng-container>
+        <ng-container matColumnDef="rowIndices">
+          <th mat-header-cell *matHeaderCellDef>Row indices</th>
+          <td mat-cell *matCellDef="let r"><div class="cell-text mono" [matTooltip]="r.rowIndices">{{ r.rowIndices }}</div></td>
+        </ng-container>
+        <ng-container matColumnDef="fingerprint">
+          <th mat-header-cell *matHeaderCellDef>Fingerprint</th>
+          <td mat-cell *matCellDef="let r"><span class="mono" [matTooltip]="r.fingerprint">{{ r.fingerprint.substring(0, 12) }}…</span></td>
+        </ng-container>
+        <ng-container matColumnDef="tracker">
+          <th mat-header-cell *matHeaderCellDef>Tracker</th>
+          <td mat-cell *matCellDef="let r" class="nowrap">
+            @if (r.trackerId) {
+              <a [routerLink]="['/tracker', r.trackerId]" (click)="$event.stopPropagation()"><app-status [value]="r.workflowStatus" /></a>
+            } @else {
+              <button mat-button (click)="track([r.groupId]); $event.stopPropagation()"><mat-icon>add</mat-icon> Track</button>
+            }
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="detail">
+          <td mat-cell *matCellDef="let r" [attr.colspan]="columns.length" class="detail-cell">
+            @if (expanded() === r.groupId) {
+            <div class="detail">
+              <div class="detail-head">
+                <span class="section-title">Normalized SQL (grouping key)</span>
+                <span class="spacer"></span>
+                <a mat-stroked-button [routerLink]="['/groups', r.groupId]"><mat-icon>open_in_new</mat-icon> Open group</a>
+                <a mat-button [routerLink]="['/logs']" [queryParams]="{ groupId: r.groupId }"><mat-icon>receipt_long</mat-icon> In log view</a>
+              </div>
+              <app-sql-block [text]="r.normalizedQuery" maxHeight="120px" />
+              <div class="section-title">Log rows in this group ({{ r.groupSize }})</div>
+              <app-group-members [groupId]="r.groupId" />
+            </div>
+            }
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="columns; sticky: true"></tr>
+        <tr mat-row *matRowDef="let row; columns: columns" class="clickable" [class.is-expanded]="expanded() === row.groupId" (click)="toggle(row)"></tr>
+        <tr mat-row *matRowDef="let row; columns: ['detail']" class="detail-row" [class.collapsed]="expanded() !== row.groupId"></tr>
+        <tr class="mat-row" *matNoDataRow>
+          <td [attr.colspan]="columns.length">
+            <div class="empty-state"><mat-icon>account_tree</mat-icon><p>No groups yet. Import query logs first.</p></div>
+          </td>
+        </tr>
+      </table>
+    </div>
+    <mat-paginator [length]="total()" [pageIndex]="pageIndex" [pageSize]="pageSize" [pageSizeOptions]="[10, 25, 50, 100]" (page)="onPage($event)" showFirstLastButtons />
+  </div>
+</div>

@@ -1,0 +1,260 @@
+@use '@angular/material' as mat;
+
+// ---------------------------------------------------------------------------
+// Theme: Material 3 system tokens. color-scheme (set by ThemeService) picks
+// light or dark through CSS light-dark(); "light dark" follows the OS.
+// ---------------------------------------------------------------------------
+html {
+  color-scheme: light dark;
+  @include mat.theme(
+    (
+      color: (
+        primary: mat.$azure-palette,
+        tertiary: mat.$violet-palette,
+      ),
+      typography: (
+        plain-family: 'Inter, Roboto, "Helvetica Neue", Arial, sans-serif',
+        brand-family: 'Inter, Roboto, "Helvetica Neue", Arial, sans-serif',
+      ),
+      density: -2,
+    )
+  );
+
+  // App tokens on top of the M3 system tokens
+  --spt-bg: light-dark(#f4f6fa, #0f1216);
+  --spt-panel: var(--mat-sys-surface-container-lowest);
+  --spt-border: var(--mat-sys-outline-variant);
+  --spt-muted: var(--mat-sys-on-surface-variant);
+  --spt-code-bg: light-dark(#f6f8fa, #161b22);
+  --spt-code-fg: light-dark(#1f2328, #e6edf3);
+  --spt-row-hover: light-dark(#eef3fb, #1b222c);
+  --spt-ok: light-dark(#1a7f37, #3fb950);
+  --spt-warn: light-dark(#9a6700, #d29922);
+  --spt-bad: light-dark(#cf222e, #f85149);
+  --spt-info: light-dark(#0969da, #58a6ff);
+  --spt-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--spt-bg);
+  color: var(--mat-sys-on-surface);
+  font: var(--mat-sys-body-medium);
+}
+
+// ---------- layout helpers ----------
+.page {
+  padding: 20px 24px 32px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+
+  h1 {
+    font: var(--mat-sys-headline-small);
+    margin: 0;
+  }
+
+  .subtitle {
+    color: var(--spt-muted);
+    font: var(--mat-sys-body-medium);
+  }
+
+  .spacer {
+    flex: 1 1 auto;
+  }
+}
+
+.panel {
+  background: var(--spt-panel);
+  border: 1px solid var(--spt-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 12px 16px 0;
+
+  mat-form-field {
+    width: 190px;
+  }
+
+  .wide {
+    width: 280px;
+  }
+}
+
+// ---------- data tables ----------
+.table-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+}
+
+table.mat-mdc-table {
+  background: transparent;
+  width: 100%;
+
+  th.mat-mdc-header-cell {
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--mat-sys-surface-container);
+  }
+
+  td.mat-mdc-cell,
+  th.mat-mdc-header-cell {
+    padding: 0 10px;
+  }
+
+  tr.mat-mdc-row.clickable {
+    cursor: pointer;
+  }
+
+  tr.mat-mdc-row:hover {
+    background: var(--spt-row-hover);
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .nowrap {
+    white-space: nowrap;
+  }
+}
+
+.cell-sql {
+  font-family: var(--spt-mono);
+  font-size: 12px;
+  max-width: 420px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-text {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mono {
+  font-family: var(--spt-mono);
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--spt-muted);
+}
+
+.empty-state {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--spt-muted);
+
+  mat-icon {
+    font-size: 40px;
+    width: 40px;
+    height: 40px;
+    opacity: 0.6;
+  }
+}
+
+// ---------- detail layouts ----------
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+
+  .kv {
+    background: var(--mat-sys-surface-container-low);
+    border: 1px solid var(--spt-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+
+    .k {
+      font: var(--mat-sys-label-medium);
+      color: var(--spt-muted);
+    }
+
+    .v {
+      font: var(--mat-sys-title-medium);
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
+      word-break: break-word;
+    }
+  }
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px 16px;
+  align-items: start;
+
+  .span-2 {
+    grid-column: span 2;
+  }
+
+  .span-all {
+    grid-column: 1 / -1;
+  }
+}
+
+.section-title {
+  font: var(--mat-sys-title-medium);
+  margin: 20px 0 10px;
+}
+
+.snack-error {
+  --mat-snack-bar-container-color: var(--mat-sys-error-container);
+  --mat-snack-bar-supporting-text-color: var(--mat-sys-on-error-container);
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 12px 16px 24px;
+  }
+
+  .form-grid .span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .filters mat-form-field,
+  .filters .wide {
+    width: 100%;
+  }
+}
+
+// ---------- links ----------
+table.mat-mdc-table a:not(.mat-mdc-button-base),
+a.link {
+  color: var(--mat-sys-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ---------- compact filter fields ----------
+.filters {
+  @include mat.form-field-density(-4);
+}
