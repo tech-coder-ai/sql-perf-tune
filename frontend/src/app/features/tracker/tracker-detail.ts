@@ -30,9 +30,20 @@ import { MinutesPipe, TimestampPipe } from '../../shared/format';
 import { deltaText } from '../../shared/grid';
 import { JourneyView } from '../../shared/journey';
 import { SqlBlock } from '../../shared/sql-block';
+import { SqlDiff } from '../../shared/sql-diff';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupMembers } from '../groups/group-members';
 import { DecisionDialog, DecisionData } from './decision-dialog';
+
+/** A SQL that can be compared: the original, an iteration, or the tracker's optimized query. */
+interface CompareOption {
+  key: string;
+  label: string;
+  /** short name, e.g. "#2" */
+  short: string;
+  sql: string | null;
+  narrative: string | null;
+}
 
 interface MetricRow {
   label: string;
@@ -72,6 +83,7 @@ const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
     MatIconModule,
     MatTooltipModule,
     SqlBlock,
+    SqlDiff,
     StatusChip,
     GroupMembers,
     JourneyView,
@@ -121,6 +133,48 @@ export class TrackerDetail implements OnInit {
   protected newIteration: { optimizedSql: string; changeNarrative: string; notes: string } | null = null;
 
   protected readonly best = computed(() => this.iterations().find((i) => i.best) ?? null);
+
+  // ---- Compare SQL tab: original vs an iteration (or any two)
+  protected readonly compareLeft = signal<string | null>(null);
+  protected readonly compareRight = signal<string | null>(null);
+
+  protected readonly compareOptions = computed<CompareOption[]>(() => {
+    const t = this.saved();
+    if (!t) return [];
+    const options: CompareOption[] = [
+      { key: 'original', label: 'Original query', short: 'the original', sql: t.sampleQueryRaw, narrative: null },
+    ];
+    for (const i of this.iterations()) {
+      if (!i.optimizedSql) continue;
+      const tags = [i.selected ? 'selected' : '', i.best ? 'best' : '', i.status === 'REJECTED' ? 'rejected' : '']
+        .filter(Boolean)
+        .join(', ');
+      options.push({
+        key: 'it:' + i.id,
+        label: `Iteration #${i.iterationNo}${tags ? ' (' + tags + ')' : ''}`,
+        short: '#' + i.iterationNo,
+        sql: i.optimizedSql,
+        narrative: i.changeNarrative,
+      });
+    }
+    // optimized SQL entered directly on the tracker (no iteration carries it)
+    if (t.optimizedQuery && !this.iterations().some((i) => i.optimizedSql === t.optimizedQuery)) {
+      options.push({ key: 'tracker', label: 'Optimized query (tracker)', short: 'the optimized query', sql: t.optimizedQuery, narrative: null });
+    }
+    return options;
+  });
+
+  /** Defaults: original vs the selected iteration, else the best, else the latest. */
+  protected readonly leftKey = computed(() => this.validKey(this.compareLeft()) ?? 'original');
+  protected readonly rightKey = computed(() => {
+    const chosen = this.validKey(this.compareRight());
+    if (chosen) return chosen;
+    const its = this.iterations().filter((i) => i.optimizedSql);
+    const pick = its.find((i) => i.selected) ?? its.find((i) => i.best) ?? its[its.length - 1];
+    return pick ? 'it:' + pick.id : (this.compareOptions().find((o) => o.key === 'tracker')?.key ?? 'original');
+  });
+  protected readonly leftOption = computed(() => this.compareOptions().find((o) => o.key === this.leftKey()) ?? null);
+  protected readonly rightOption = computed(() => this.compareOptions().find((o) => o.key === this.rightKey()) ?? null);
   protected readonly selected = computed(() => this.iterations().find((i) => i.selected) ?? null);
 
   protected readonly metrics = computed<MetricRow[]>(() => {
@@ -230,6 +284,23 @@ export class TrackerDetail implements OnInit {
   }
 
   // ------------------------------------------------------------------ iterations
+
+  compareWith(i: Iteration): void {
+    this.compareLeft.set('original');
+    this.compareRight.set('it:' + i.id);
+    this.tab.set(2);
+  }
+
+  swapCompare(): void {
+    const l = this.leftKey();
+    const r = this.rightKey();
+    this.compareLeft.set(r);
+    this.compareRight.set(l);
+  }
+
+  private validKey(key: string | null): string | null {
+    return key && this.compareOptions().some((o) => o.key === key) ? key : null;
+  }
 
   startNewIteration(): void {
     this.tab.set(1);
