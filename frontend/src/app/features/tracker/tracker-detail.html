@@ -196,6 +196,7 @@
                   </td>
                   <td class="small">{{ i.testedAt | ts }}</td>
                   <td class="row-actions">
+                    <button mat-icon-button (click)="compareWith(i)" [disabled]="!i.optimizedSql" matTooltip="Compare with the original SQL" aria-label="Compare with the original SQL"><mat-icon>difference</mat-icon></button>
                     <button mat-icon-button (click)="edit(i)" matTooltip="Open / enter test results" aria-label="Edit iteration"><mat-icon>edit</mat-icon></button>
                     @if (i.status === 'TESTED' || i.status === 'PROPOSED') {
                       <button mat-icon-button (click)="select(i)" matTooltip="Select for adoption" aria-label="Select for adoption"><mat-icon>how_to_reg</mat-icon></button>
@@ -250,6 +251,51 @@
                 <button mat-flat-button (click)="saveIteration()"><mat-icon>save</mat-icon> Save results</button>
               </div>
             </div>
+          }
+        </div>
+      </mat-tab>
+
+      <!-- ======================================================== COMPARE SQL -->
+      <mat-tab label="Compare SQL">
+        <div class="tab-body">
+          @if (compareOptions().length < 2) {
+            <div class="empty-state">
+              <mat-icon>difference</mat-icon>
+              <div>No optimized SQL yet. Add an iteration (or paste the agent's answer) to compare it with the original.</div>
+              <button mat-stroked-button (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
+            </div>
+          } @else {
+            <div class="compare-pick">
+              <mat-form-field subscriptSizing="dynamic">
+                <mat-label>Compare</mat-label>
+                <mat-select [value]="leftKey()" (selectionChange)="compareLeft.set($event.value)">
+                  @for (o of compareOptions(); track o.key) {
+                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+              <button mat-icon-button (click)="swapCompare()" matTooltip="Swap sides" aria-label="Swap sides"><mat-icon>swap_horiz</mat-icon></button>
+              <mat-form-field subscriptSizing="dynamic">
+                <mat-label>with</mat-label>
+                <mat-select [value]="rightKey()" (selectionChange)="compareRight.set($event.value)">
+                  @for (o of compareOptions(); track o.key) {
+                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <app-sql-diff
+              [left]="leftOption()?.sql"
+              [right]="rightOption()?.sql"
+              [leftLabel]="leftOption()?.label ?? ''"
+              [rightLabel]="rightOption()?.label ?? ''"
+            />
+            @if (rightOption()?.narrative; as n) {
+              <div class="card narrative">
+                <div class="card-title">What changed in {{ rightOption()?.short }}</div>
+                <pre>{{ n }}</pre>
+              </div>
+            }
           }
         </div>
       </mat-tab>
@@ -416,6 +462,11 @@
         <div class="tab-body grid-2">
           <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="480px" />
           <app-sql-block [text]="t.optimizedQuery" label="Optimized query (selected iteration)" maxHeight="480px" placeholder="No iteration selected yet" />
+          @if (t.optimizedQuery) {
+            <div class="span-2">
+              <button mat-stroked-button (click)="tab.set(2)"><mat-icon>difference</mat-icon> Compare original vs optimized</button>
+            </div>
+          }
           <app-sql-block [text]="t.cleansedQuery" label="Cleansed query" maxHeight="240px" />
           <div class="muted mono small">fingerprint {{ t.fingerprint }}<br />row indices {{ t.rowIndices }}</div>
         </div>

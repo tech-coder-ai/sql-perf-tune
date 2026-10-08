@@ -75,6 +75,12 @@ html {
   --spt-post-ink: light-dark(#14622f, #80d6a3);
   --spt-delta: light-dark(#ede9fd, #29264f);
   --spt-delta-ink: light-dark(#4b3aa8, #bcb0ff);
+
+  // SQL diff: removed (red) / added (green) line backgrounds and the stronger word highlights
+  --spt-diff-del: light-dark(#fdeced, #3a1c22);
+  --spt-diff-del-strong: light-dark(#f8c4c8, #6e2b35);
+  --spt-diff-add: light-dark(#e3f6e8, #15362a);
+  --spt-diff-add-strong: light-dark(#b5e6c3, #1f6141);
   --spt-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 
   // Chart tokens (validated categorical slots 1-3; see docs/developer-guide.md)

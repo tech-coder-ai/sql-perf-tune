@@ -273,11 +273,14 @@ are shown in red.
 - **Tabs:**
   1. **Overview:** before / after of run time, execution, teardown, Impala CPU, rows and tables scanned and
      peak memory, from the original run and the selected iteration.
-  2. **Iterations:** every tuning attempt (§8.2).
-  3. **Tracking:** all tracking fields (§8.3).
-  4. **Queries:** raw, formatted, cleansed (comments removed, still runnable) and optimized SQL.
-  5. **Log rows:** the underlying executions.
-  6. **History:** who changed which field, when, from what to what, including every stage change.
+  2. **Iterations:** every tuning attempt (§8.2). The compare icon on a row opens that iteration in
+     **Compare SQL**.
+  3. **Compare SQL:** the original query next to an optimized one, with the differences highlighted
+     (§8.5).
+  4. **Tracking:** all tracking fields (§8.3).
+  5. **Queries:** raw, formatted, cleansed (comments removed, still runnable) and optimized SQL.
+  6. **Log rows:** the underlying executions.
+  7. **History:** who changed which field, when, from what to what, including every stage change.
 
 ### 8.2 Tuning iterations
 
@@ -321,6 +324,21 @@ Use **New tuning request** in the app bar when SQL needs tuning before it shows 
 tuning in UAT) or when a user asks for help. Paste the SQL and choose the source, who requested it, the
 environment, priority and theme. If the same SQL (ignoring filters) already has a group, the request joins
 it; otherwise a new group is created. Insights Q14 compares the sources.
+
+### 8.5 Compare original and optimized SQL
+
+Open **Compare SQL** on a tracker item (or the compare icon of an iteration, or *Compare original vs optimized*
+on the Queries tab). By default it compares the **original query** with the selected iteration (else the best,
+else the latest). Pick any two from *Compare* / *with* (e.g. iteration #1 vs #2) and use ⇄ to swap sides.
+
+- **Side by side:** original on the left (orange header), optimized on the right (green header). Removed lines
+  are red with a **−**, added lines green with a **+**; in a changed line only the changed words are
+  highlighted. **Inline** shows one column, removed lines above added ones (default on phones).
+- **Format SQL** (on by default) lays both statements out the same way first, so the diff shows real changes,
+  not line breaks or indentation. **Ignore case & spacing** hides differences in keyword case and spaces.
+  **Hide unchanged lines** folds long unchanged parts (click a fold to expand).
+- The counters show how many lines changed, were added and removed. The iteration's change narrative is shown
+  under the diff.
 
 ---
 

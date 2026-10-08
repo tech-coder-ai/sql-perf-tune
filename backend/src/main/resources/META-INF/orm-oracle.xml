@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Oracle only (spring.jpa.mapping-resources in application-oracle.yml).
+
+  The high-volume tables take their ids from sequences that hand out blocks of 1000 (V5__pooled_ids.sql,
+  Hibernate "pooled-lo" optimizer) instead of IDENTITY. With IDENTITY the database assigns every id, so
+  Hibernate must send one INSERT round trip per row; with pooled ids it numbers the rows itself and sends
+  the INSERTs as JDBC batches (hibernate.jdbc.batch_size). SQLite (local development) keeps IDENTITY:
+  it has no sequences, and its table-based emulation needs a second connection.
+-->
+<entity-mappings xmlns="https://jakarta.ee/xml/ns/persistence/orm"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:schemaLocation="https://jakarta.ee/xml/ns/persistence/orm https://jakarta.ee/xml/ns/persistence/orm/orm_3_1.xsd"
+                 version="3.1">
+
+    <sequence-generator name="spt_query_log_seq" sequence-name="SPT_QUERY_LOG_SEQ" allocation-size="1000"/>
+    <sequence-generator name="spt_query_log_sighting_seq" sequence-name="SPT_QUERY_LOG_SIGHTING_SEQ" allocation-size="1000"/>
+    <sequence-generator name="spt_query_group_seq" sequence-name="SPT_QUERY_GROUP_SEQ" allocation-size="1000"/>
+
+    <entity class="com.techcoder.sqlperf.log.QueryLog">
+        <attributes>
+            <id name="id">
+                <generated-value strategy="SEQUENCE" generator="spt_query_log_seq"/>
+            </id>
+        </attributes>
+    </entity>
+    <entity class="com.techcoder.sqlperf.log.LogSighting">
+        <attributes>
+            <id name="id">
+                <generated-value strategy="SEQUENCE" generator="spt_query_log_sighting_seq"/>
+            </id>
+        </attributes>
+    </entity>
+    <entity class="com.techcoder.sqlperf.group.QueryGroup">
+        <attributes>
+            <id name="id">
+                <generated-value strategy="SEQUENCE" generator="spt_query_group_seq"/>
+            </id>
+        </attributes>
+    </entity>
+</entity-mappings>

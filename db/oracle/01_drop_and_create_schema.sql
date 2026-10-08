@@ -4,7 +4,7 @@
 --
 -- !!! DESTRUCTIVE: all SPT data (logs, groups, tracker, history) is lost. !!!
 --
--- Equivalent to Flyway migrations V1-V4 (backend/src/main/resources/db/migration/oracle)
+-- Equivalent to Flyway migrations V1-V5 (backend/src/main/resources/db/migration/oracle)
 -- in a single script, for DBAs who build or reset an environment by hand.
 --
 -- Run as the schema owner (e.g. SPT_OWNER, see 00_create_schema.sql) with SQL*Plus, SQLcl or
@@ -12,13 +12,13 @@
 --     sqlplus SPT_OWNER@//host:1521/SERVICE @01_drop_and_create_schema.sql
 --
 -- Flyway: the script also drops "flyway_schema_history". Start the service once with
---     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=4
--- so Flyway records this schema as version 4 and only applies newer migrations (V5+).
+--     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=5
+-- so Flyway records this schema as version 5 and only applies newer migrations (V6+).
 -- (Or set spring.flyway.enabled=false and keep the schema up to date with scripts.)
 --
 -- Contents
---   1. Drop view and tables (missing objects are skipped)
---   2. Tables, constraints, indexes, comments (in dependency order)
+--   1. Drop view, tables and sequences (missing objects are skipped)
+--   2. Tables, constraints, indexes, comments (in dependency order), pooled-id sequences
 --   3. Reporting view SPT_TRACKER_V
 --   4. Initial values: AI prompt template, dropdown values (SPT_LOOKUP)
 -- =====================================================================
@@ -40,6 +40,19 @@ BEGIN
         WHEN OTHERS THEN
             IF SQLCODE != -942 THEN RAISE; END IF;
     END;
+
+    FOR q IN (
+        SELECT COLUMN_VALUE AS NAME
+          FROM TABLE(SYS.ODCIVARCHAR2LIST('SPT_QUERY_LOG_SEQ', 'SPT_QUERY_LOG_SIGHTING_SEQ', 'SPT_QUERY_GROUP_SEQ'))
+    ) LOOP
+        BEGIN
+            EXECUTE IMMEDIATE 'DROP SEQUENCE ' || q.NAME;
+            DBMS_OUTPUT.PUT_LINE('dropped sequence ' || q.NAME);
+        EXCEPTION
+            WHEN OTHERS THEN
+                IF SQLCODE != -2289 THEN RAISE; END IF;
+        END;
+    END LOOP;
 
     -- children first; CASCADE CONSTRAINTS also removes the circular tracker <-> iteration keys
     FOR t IN (
@@ -561,6 +574,14 @@ CREATE TABLE SPT_USER_DIRECTORY (
     CONSTRAINT CK_SPT_USERDIR_ACTIVE CHECK (ACTIVE IN (0, 1))
 );
 CREATE INDEX IX_SPT_USERDIR_GROUP ON SPT_USER_DIRECTORY (USER_GROUP);
+
+-- ---------------------------------------------------------------------
+-- Pooled ids for the high-volume tables (V5): the service takes blocks of 1000 ids and sends INSERTs as
+-- JDBC batches (one round trip per 100 rows instead of one per row)
+-- ---------------------------------------------------------------------
+CREATE SEQUENCE SPT_QUERY_LOG_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
+CREATE SEQUENCE SPT_QUERY_LOG_SIGHTING_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
+CREATE SEQUENCE SPT_QUERY_GROUP_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
 
 -- =====================================================================
 -- 3. VIEW: tracking screen = tracker + live group metrics
