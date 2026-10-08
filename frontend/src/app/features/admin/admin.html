@@ -7,6 +7,92 @@
   </div>
 
   <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs">
+    <mat-tab label="Dropdown values">
+      <div class="tab-body cols">
+        <div>
+          <mat-form-field>
+            <mat-label>Field</mat-label>
+            <mat-select [(ngModel)]="lookupCategory">
+              @for (c of lookups.categories(); track c) {
+                <mat-option [value]="c">{{ categoryLabels[c] ?? c }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <p class="muted">
+            Values offered in the tracker dropdowns. Deactivate a value to stop offering it; records that already use it keep it.
+            The colour is used for the status chip.
+          </p>
+          <table class="simple">
+            <tr><th>Value</th><th>Colour</th><th>Active</th><th></th></tr>
+            @for (l of lookups.entries(lookupCategory); track l.id; let first = $first; let last = $last) {
+              <tr [class.inactive]="!l.active">
+                <td><app-status [value]="l.value" [tone]="l.tone" [text]="l.value" /></td>
+                <td>
+                  <mat-select [value]="l.tone" (selectionChange)="updateLookup(l, { tone: $event.value })" class="tone-select" aria-label="Colour">
+                    @for (t of tones; track t) {
+                      <mat-option [value]="t">{{ t }}</mat-option>
+                    }
+                  </mat-select>
+                </td>
+                <td><mat-checkbox [checked]="l.active" (change)="updateLookup(l, { active: $event.checked })" aria-label="Active" /></td>
+                <td class="nowrap">
+                  <button mat-icon-button [disabled]="first" (click)="moveLookup(l, -1)" aria-label="Move up"><mat-icon>arrow_upward</mat-icon></button>
+                  <button mat-icon-button [disabled]="last" (click)="moveLookup(l, 1)" aria-label="Move down"><mat-icon>arrow_downward</mat-icon></button>
+                </td>
+              </tr>
+            }
+          </table>
+        </div>
+        <form class="form-grid editor" (ngSubmit)="addLookup()">
+          <div class="span-all section-title">Add a value to “{{ categoryLabels[lookupCategory] ?? lookupCategory }}”</div>
+          <mat-form-field class="span-all"><mat-label>Value</mat-label><input matInput name="value" [(ngModel)]="newLookup.value" required /></mat-form-field>
+          <mat-form-field>
+            <mat-label>Colour</mat-label>
+            <mat-select name="tone" [(ngModel)]="newLookup.tone">
+              @for (t of tones; track t) {
+                <mat-option [value]="t">{{ t }}</mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <div class="span-all actions"><button mat-flat-button type="submit" [disabled]="!newLookup.value"><mat-icon>add</mat-icon> Add value</button></div>
+        </form>
+      </div>
+    </mat-tab>
+
+    <mat-tab label="Users & groups">
+      <div class="tab-body cols">
+        <div>
+          <p class="muted">
+            Maps the user ids in the logs to user groups / departments for “bad queries by user group” (Insights Q7).
+            Upload a CSV with columns <span class="mono">user_id, user_group, display_name, department</span> or edit below.
+          </p>
+          <ag-grid-angular
+            class="grid batches"
+            [gridOptions]="userGrid"
+            [columnDefs]="userCols"
+            [rowData]="directory()"
+            (rowClicked)="editUser($event.data)"
+          />
+        </div>
+        <form class="form-grid editor" (ngSubmit)="saveUser()">
+          <div class="span-all section-title">{{ userEdit.updatedAt ? 'Edit ' + userEdit.userId : 'Add user' }}</div>
+          <mat-form-field><mat-label>User id</mat-label><input matInput name="userId" [(ngModel)]="userEdit.userId" required [readonly]="!!userEdit.updatedAt" /></mat-form-field>
+          <mat-form-field><mat-label>Name</mat-label><input matInput name="displayName" [(ngModel)]="userEdit.displayName" /></mat-form-field>
+          <mat-form-field><mat-label>User group</mat-label><input matInput name="userGroup" [(ngModel)]="userEdit.userGroup" /></mat-form-field>
+          <mat-form-field><mat-label>Department</mat-label><input matInput name="department" [(ngModel)]="userEdit.department" /></mat-form-field>
+          <div class="span-all actions">
+            <input #usersFile type="file" hidden accept=".csv" (change)="uploadUsers($event)" />
+            <button mat-button type="button" (click)="usersFile.click()"><mat-icon>upload_file</mat-icon> Upload CSV</button>
+            @if (userEdit.updatedAt) {
+              <button mat-button type="button" (click)="deleteUser()"><mat-icon>delete</mat-icon> Delete</button>
+            }
+            <button mat-button type="button" (click)="userEdit = {}">Clear</button>
+            <button mat-flat-button type="submit" [disabled]="!userEdit.userId"><mat-icon>save</mat-icon> Save</button>
+          </div>
+        </form>
+      </div>
+    </mat-tab>
+
     <mat-tab label="Data sources">
       <div class="tab-body cols">
         <div>

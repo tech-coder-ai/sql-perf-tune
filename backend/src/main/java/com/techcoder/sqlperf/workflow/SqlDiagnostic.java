@@ -46,6 +46,16 @@ public class SqlDiagnostic {
     private Long rowCount;
     private Double runDurationSeconds;
 
+    /** The tuning iteration this post-run test belongs to (phase OPTIMIZED). */
+    private Long iterationId;
+    private Double executionTimeSeconds;
+    private Double teardownTimeSeconds;
+    private Double cpuSeconds;
+    private Long rowsScanned;
+    private Long bytesScanned;
+    private Integer tablesScanned;
+    private Double peakMemoryMb;
+
     @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
     private String explainPlan;
     @JdbcTypeCode(SqlTypes.LONG32VARCHAR)

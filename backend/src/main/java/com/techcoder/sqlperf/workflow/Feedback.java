@@ -35,6 +35,12 @@ public class Feedback {
 
     private Long optimizationRunId;
 
+    /** The tuning iteration the decision is about. */
+    private Long iterationId;
+
+    /** Lookup REJECTION_REASON (e.g. "Inaccurate results") for REJECTED decisions. */
+    private String rejectionReason;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private SourceRole sourceRole;

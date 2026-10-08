@@ -7,7 +7,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
@@ -148,8 +148,11 @@ export class Groups {
     { colId: 'tracker', headerName: 'Tracker', width: 175, pinned: 'right', cellRenderer: TrackerCell },
   ];
 
+  private readonly route = inject(ActivatedRoute);
+
   onReady(e: GridReadyEvent<QueryGroup>): void {
     this.grid = e.api;
+    this.filter.tracked = this.route.snapshot.queryParamMap.get('tracked') ?? '';
     e.api.setGridOption(
       'serverSideDatasource',
       pagedDatasource(

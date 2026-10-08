@@ -1,61 +1,74 @@
+<mat-toolbar class="appbar">
+  <button
+    mat-icon-button
+    (click)="compact() ? drawer.toggle() : toggleMini()"
+    aria-label="Toggle navigation"
+    matTooltip="Menu"
+  >
+    <mat-icon>menu</mat-icon>
+  </button>
+  <a class="brand" routerLink="/home">
+    <span class="logo"><mat-icon>speed</mat-icon></span>
+    <span class="name">SQL Tuning Workbench</span>
+    <span class="engine">Impala</span>
+  </a>
+  <span class="spacer"></span>
+  @if (!compact()) {
+    <app-global-search />
+  }
+  <span class="spacer"></span>
+  <button mat-stroked-button class="on-blue" (click)="newRequest()">
+    <mat-icon>add_task</mat-icon>
+    @if (!compact()) {
+      New tuning request
+    }
+  </button>
+  <button
+    mat-icon-button
+    (click)="theme.cycle()"
+    [matTooltip]="'Theme: ' + theme.mode()"
+    [attr.aria-label]="'Switch theme, current ' + theme.mode()"
+  >
+    <mat-icon>{{ themeIcon() }}</mat-icon>
+  </button>
+  <a mat-icon-button class="api-link" href="/swagger-ui.html" target="_blank" matTooltip="API documentation" aria-label="API docs">
+    <mat-icon>api</mat-icon>
+  </a>
+</mat-toolbar>
+
 <mat-sidenav-container class="shell">
   <mat-sidenav
     #drawer
     [mode]="compact() ? 'over' : 'side'"
     [opened]="!compact()"
     class="sidenav"
-    [attr.role]="compact() ? 'dialog' : 'navigation'"
+    [class.mini]="mini() && !compact()"
   >
-    <div class="brand">
-      <mat-icon class="brand-icon">speed</mat-icon>
-      <div>
-        <div class="brand-name">SQL Tuning</div>
-        <div class="brand-sub">Performance workbench</div>
-      </div>
-    </div>
-    <mat-nav-list>
-      @for (item of nav; track item.path) {
-        <a
-          mat-list-item
-          [routerLink]="item.path"
-          routerLinkActive
-          #rla="routerLinkActive"
-          [activated]="rla.isActive"
-          (click)="compact() && drawer.close()"
-        >
-          <mat-icon matListItemIcon>{{ item.icon }}</mat-icon>
-          <span matListItemTitle>{{ item.label }}</span>
-          <span matListItemLine class="hint">{{ item.hint }}</span>
-        </a>
+    <nav>
+      @for (s of sections; track s.title) {
+        <div class="section">{{ mini() && !compact() ? '' : s.title }}</div>
+        @for (item of s.items; track item.path) {
+          <a
+            class="nav-item"
+            [routerLink]="item.path"
+            routerLinkActive="active"
+            [matTooltip]="mini() && !compact() ? item.label : item.hint"
+            matTooltipPosition="right"
+            (click)="compact() && drawer.close()"
+          >
+            <mat-icon>{{ item.icon }}</mat-icon>
+            <span class="label">{{ item.label }}</span>
+          </a>
+        }
       }
-    </mat-nav-list>
-    <div class="engine-note">
+    </nav>
+    <div class="nav-foot">
       <mat-icon>bolt</mat-icon>
-      <span>Use case: Impala</span>
+      <span class="label">Use case: Cloudera Impala</span>
     </div>
   </mat-sidenav>
 
   <mat-sidenav-content>
-    <mat-toolbar class="topbar">
-      @if (compact()) {
-        <button mat-icon-button (click)="drawer.toggle()" aria-label="Toggle navigation">
-          <mat-icon>menu</mat-icon>
-        </button>
-      }
-      <span class="title">Impala SQL · Performance &amp; Tuning</span>
-      <span class="spacer"></span>
-      <button
-        mat-icon-button
-        (click)="theme.cycle()"
-        [matTooltip]="'Theme: ' + theme.mode()"
-        [attr.aria-label]="'Switch theme, current ' + theme.mode()"
-      >
-        <mat-icon>{{ themeIcon() }}</mat-icon>
-      </button>
-      <a mat-icon-button href="/swagger-ui.html" target="_blank" matTooltip="API documentation" aria-label="API docs">
-        <mat-icon>api</mat-icon>
-      </a>
-    </mat-toolbar>
     <main>
       <router-outlet />
     </main>

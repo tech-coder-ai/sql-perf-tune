@@ -1,0 +1,103 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Pipeline board</h1>
+      <div class="subtitle">{{ total() }} open items. Each card is a SQL pattern on its way to adoption; open it to see its journey.</div>
+    </div>
+    <span class="spacer"></span>
+    <mat-slide-toggle [checked]="showClosed()" (change)="toggleClosed($event.checked)">Show adopted & rejected</mat-slide-toggle>
+    <a mat-stroked-button routerLink="/tracker"><mat-icon>table_view</mat-icon> Table view</a>
+  </div>
+
+  <form class="filters panel" (ngSubmit)="load()">
+    <mat-form-field class="wide">
+      <mat-label>Search SQL, problem, theme</mat-label>
+      <input matInput name="q" [(ngModel)]="filter.q" />
+      <mat-icon matSuffix>search</mat-icon>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Theme</mat-label>
+      <mat-select name="theme" [(ngModel)]="filter.theme" (selectionChange)="load()">
+        <mat-option value="">Any</mat-option>
+        @for (t of lookups.options('THEME'); track t) {
+          <mat-option [value]="t">{{ t }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Priority</mat-label>
+      <mat-select name="priority" [(ngModel)]="filter.priority" (selectionChange)="load()">
+        <mat-option value="">Any</mat-option>
+        @for (p of priorities; track p) {
+          <mat-option [value]="p">{{ p }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Source</mat-label>
+      <mat-select name="requestSource" [(ngModel)]="filter.requestSource" (selectionChange)="load()">
+        <mat-option value="">Any</mat-option>
+        @for (s of sources; track s) {
+          <mat-option [value]="s">{{ sourceLabel[s] }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Team lead</mat-label>
+      <input matInput name="lead" [(ngModel)]="filter.lead" />
+    </mat-form-field>
+    <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
+    <button mat-button type="button" (click)="reset()">Reset</button>
+  </form>
+
+  <div class="board">
+    @for (col of columns(); track col.status) {
+      <section class="column" [attr.id]="'col-' + col.status" [class]="'column tone-' + stage[col.status].tone">
+        <header>
+          <mat-icon>{{ stage[col.status].icon }}</mat-icon>
+          <div class="col-title">
+            <div class="name">{{ stage[col.status].label }} <span class="count">{{ col.cards.length }}</span></div>
+            <div class="hint">{{ stage[col.status].hint }}@if (col.avgDays !== null) { · avg {{ col.avgDays }}d }</div>
+          </div>
+        </header>
+        <div class="cards">
+          @for (c of col.cards; track c.trackerId) {
+            <a class="card-item" [routerLink]="['/tracker', c.trackerId]">
+              <div class="top">
+                <span class="mono id">T-{{ c.trackerId }}</span>
+                <app-status [value]="c.priority" />
+                @if (c.requestSource !== 'LOG_DETECTED') {
+                  <app-status [value]="c.requestSource" />
+                }
+                <span class="spacer"></span>
+                <span [class]="'age ' + age(c)" [matTooltip]="'In this stage for ' + (c.daysInStage ?? 0) + ' days'">
+                  <mat-icon>schedule</mat-icon>{{ c.daysInStage ?? 0 }}d
+                </span>
+              </div>
+              @if (c.theme) {
+                <div class="theme">{{ c.theme }}</div>
+              }
+              <div class="sql">{{ c.sqlSnippet }}</div>
+              <div class="foot">
+                <span matTooltip="Runs in the logs · total run time"><mat-icon>repeat</mat-icon>{{ c.groupSize }} · {{ minutesText(c.totalDurationMinutes) }}</span>
+                @if (c.iterationCount) {
+                  <span matTooltip="Tuning iterations"><mat-icon>science</mat-icon>{{ c.iterationCount }}</span>
+                }
+                @if (c.improvementPct !== null) {
+                  <span class="gain" [class.neg]="c.improvementPct < 0" matTooltip="Run time improvement of the selected iteration">
+                    <mat-icon>trending_down</mat-icon>{{ c.improvementPct }}%
+                  </span>
+                }
+                @if (c.devTeamLead) {
+                  <span class="lead"><mat-icon>person</mat-icon>{{ c.devTeamLead }}</span>
+                }
+              </div>
+            </a>
+          } @empty {
+            <div class="empty">Nothing here</div>
+          }
+        </div>
+      </section>
+    }
+  </div>
+</div>

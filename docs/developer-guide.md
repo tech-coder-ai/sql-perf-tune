@@ -55,21 +55,25 @@ backend/
     ingestion/     file parser, JDBC puller, IngestionService (de-duplication), RowKeys, SourceFile, RowKeyBackfill
     log/           QueryLog, LogSighting (load history), controller
     group/         QueryGroup, GroupingService, controller
-    tracker/       TuningTracker, TrackerService (audited updates), Excel exporter, controller
+    tracker/       TuningTracker, TrackerService (stages, journey, board, requests, audited updates), Excel export
+    iteration/     TuningIteration, IterationService (best / select / adopt / reject)
     workflow/      diagnostics, Impala profile parser, prompt templates, optimization runs, feedback
+    insights/      InsightsService (Q1-Q15), controller
+    lookup/        dropdown values (SPT_LOOKUP)
+    users/         user directory: user id -> user group (SPT_USER_DIRECTORY)
     customfield/   runtime custom columns
     audit/         field-level change history
-    dashboard/
+    dashboard/     global search
   src/main/resources/
     application*.yml
     db/migration/oracle/V*.sql     <- Oracle DDL (also the DBA deliverable)
     db/migration/sqlite/V*.sql     <- SQLite twins, same version numbers
 frontend/
-  src/app/core/        API client, models, theme, interceptor, prefs
-  src/app/shared/      grid.ts (AG Grid setup), SQL viewer, status chip, formatters
-  src/app/features/    dashboard, logs, groups, tracker, admin
+  src/app/core/        API client, models, theme, interceptor, prefs, stages.ts, lookups.ts (LookupStore)
+  src/app/shared/      grid.ts (AG Grid setup), charts.ts, journey stepper, request dialog, SQL viewer, chips
+  src/app/features/    home (command center), insights, pipeline, logs, groups, tracker, admin
 db/oracle/00_create_schema.sql    one-off DBA script (users / grants)
-samples/                          sample input logs
+samples/                          sample input logs and user directory
 docs/                             architecture, developer guide, user manual
 ```
 
@@ -86,8 +90,8 @@ docs/                             architecture, developer guide, user manual
 - Never edit an applied migration; add a new one.
 - Text columns longer than 4000 chars are `CLOB` in Oracle and mapped in JPA with
   `@JdbcTypeCode(SqlTypes.LONG32VARCHAR)` (not `@Lob`) so they bind as strings and can be searched.
-- Case-insensitive search uses the custom HQL function `spt_lower(...)` (see `SptFunctionContributor`),
-  which works on Oracle CLOBs and with the SQLite dialect.
+- Custom HQL functions (`SptFunctionContributor`, dialect-aware): `spt_lower(...)` for case-insensitive search
+  on Oracle CLOBs and SQLite, and `spt_date(ts)` for grouping by calendar day (§9).
 - Oracle scripts were written for 19c+ (identity columns). Run them against your target version in CI
   before the first shared deployment.
 
@@ -95,8 +99,11 @@ docs/                             architecture, developer guide, user manual
 
 `SPT_INGESTION_BATCH`, `SPT_SOURCE_FILE`, `SPT_QUERY_LOG`, `SPT_QUERY_LOG_SIGHTING`, `SPT_QUERY_GROUP`,
 `SPT_TUNING_TRACKER` (+ view `SPT_TRACKER_V`), `SPT_SQL_DIAGNOSTIC`, `SPT_TABLE_DDL`,
-`SPT_PROMPT_TEMPLATE`, `SPT_OPTIMIZATION_RUN`, `SPT_FEEDBACK`, `SPT_CUSTOM_FIELD(_VALUE)`,
-`SPT_AUDIT_EVENT`, `SPT_DATA_SOURCE`. See [architecture.md](architecture.md) for the ER diagram.
+`SPT_PROMPT_TEMPLATE`, `SPT_OPTIMIZATION_RUN`, `SPT_TUNING_ITERATION`, `SPT_FEEDBACK`,
+`SPT_CUSTOM_FIELD(_VALUE)`, `SPT_AUDIT_EVENT`, `SPT_DATA_SOURCE`, `SPT_LOOKUP`, `SPT_USER_DIRECTORY`.
+
+Migrations: V1 core schema, V2 prompt seed, V3 load de-duplication, V4 analytics and iterations (lookups,
+iterations, stage timestamps, CPU / scan metrics, user directory, request source). See [architecture.md](architecture.md) for the ER diagram.
 
 ---
 
@@ -134,8 +141,17 @@ upload ──► SHA-256 of file ──► SPT_SOURCE_FILE has hash?
   a null key and are logged.
 - JDBC pulls use the same row-level logic; `:since` in the source query limits the pull to new rows.
 
+**Background processing.** Upload and pull return the batch immediately (`RUNNING`) and run on the
+single-thread `ingestionExecutor` (`AsyncConfig`), which also serializes imports. Progress (`ROWS_READ`,
+`ROWS_LOADED`, …) is committed per chunk; the UI polls `GET /api/ingestion/batches/{id}`.
+`POST /api/ingestion/batches/{id}/cancel` stops the import after the current chunk. Whether a batch completes,
+fails or is cancelled, the fingerprints of the rows it inserted are regrouped, so loaded rows always appear
+on the groups screen. `IngestionRecovery` runs at start-up: batches still `RUNNING` (server stopped mid-import)
+become `FAILED` ("Interrupted…") and any log rows without a group are grouped.
+
 Endpoints: `POST /api/ingestion/upload`, `POST /api/ingestion/pull/{id}`, `GET /api/ingestion/batches`,
-`GET /api/ingestion/files`, `GET /api/logs/{id}/history`.
+`GET /api/ingestion/batches/{id}`, `POST /api/ingestion/batches/{id}/cancel`, `GET /api/ingestion/files`,
+`GET /api/logs/{id}/history`.
 
 ---
 
@@ -168,13 +184,135 @@ For business-owned columns that may change, prefer **custom columns** (Administr
 
 ---
 
-## 8. Frontend
+## 8. Tuning lifecycle: stages and iterations
+
+### Stages
+
+`WORKFLOW_STATUS` is the stage. The UI labels (`frontend/src/app/core/stages.ts`) are:
+
+| Status | Label | Entered when |
+|---|---|---|
+| `NEW` | Triage | item created (from a group, or `POST /api/tracker/requests`) |
+| `DIAGNOSTICS_CAPTURED` | Diagnosed | original-phase diagnostic saved |
+| `OPTIMIZATION_REQUESTED` | Tuning | agent run started, or an iteration was rejected |
+| `OPTIMIZED` | Candidate ready | an iteration exists (agent answer or manual) |
+| `POST_RUN_VALIDATED` | Tested | an iteration got test results |
+| `SME_VALIDATION` | Awaiting adoption | an iteration was selected |
+| `ADOPTED` | Adopted | feedback `ADOPTED` |
+| `REJECTED` / `ON_HOLD` | Rejected / On hold | feedback `REJECTED` without an iteration / manual |
+
+`TrackerService.changeStatus` is the **only** setter: it writes the audit event and maintains
+`STAGE_CHANGED_AT`, `ADOPTED_AT` and `CLOSED_AT`. Automatic transitions use `advanceTo`, which only moves
+forward (a late diagnostic never pulls an item back). The journey endpoint (`GET /api/tracker/{id}/journey`)
+rebuilds the timeline from the `workflowStatus` audit events; the board (`GET /api/tracker/board`) returns
+one `BoardCard` per item with `daysInStage`.
+
+`REQUEST_SOURCE` is `LOG_DETECTED` (default), `PROACTIVE_UAT` or `USER_REQUEST`. A request fingerprints the
+SQL and joins an existing group or creates one.
+
+### Iterations (`SPT_TUNING_ITERATION`, package `iteration/`)
+
+```
+agent answer / manual ──► PROPOSED ──test──► TESTED (or FAILED) ──select──► SELECTED ──feedback──► ADOPTED
+                                                                                       └──────────► REJECTED
+```
+
+- Created by `WorkflowService` (agent answer, `SOURCE=AI_AGENT`) or `POST /api/tracker/{id}/iterations`
+  (`MANUAL`). Numbered per tracker (`ITERATION_NO`).
+- Test results come from an `OPTIMIZED`-phase diagnostic with `iterationId` (parsed by
+  `ImpalaProfileParser`: duration, execution, teardown, CPU from *Per Node User/System Time*, rows / tables /
+  peak memory from the ExecSummary) or from `PUT .../iterations/{id}` (manual entry).
+- **Best** = fastest tested iteration (with a run duration) whose `RESULT_MATCHES` is not false, ties broken by CPU
+  (`IterationService.best`).
+- `POST .../iterations/{id}/select` copies the iteration's SQL and post-run metrics to the tracker
+  (`SELECTED_ITERATION_ID`) and moves the item to `SME_VALIDATION`.
+- `POST /api/groups/{id}/feedback` with `decision=ADOPTED` adopts the selected (or given) iteration and closes
+  the item. `REJECTED` + `iterationId` rejects that iteration (with `REJECTION_REASON`) and sends the item back
+  to `OPTIMIZATION_REQUESTED`; `REJECTED` without an iteration closes the item.
+
+`TuningLifecycleTest` walks an item through the whole lifecycle and checks every insight.
+
+---
+
+## 9. Insights (`insights/`)
+
+`InsightsService` answers the 15 programme questions; the class Javadoc holds the definitions (bad query,
+pattern, recurring, optimized, outstanding, estimated savings).
+
+| Endpoint | Questions | Parameters |
+|---|---|---|
+| `GET /api/insights/daily` | Q1, Q2, Q3, Q8, last 14 days | `date` |
+| `GET /api/insights/pipeline` | Q4, Q6, Q9, Q15, stage counts | `priorDay`, `from`, `to` |
+| `GET /api/insights/savings` | Q5, Q11 | `from`, `to` |
+| `GET /api/insights/themes` | Q12 | `days` (default 30) |
+| `GET /api/insights/users` | Q7, Q13 | `from`, `to` |
+| `GET /api/insights/trends` | Q10, Q14 | `months` (default 12) |
+
+Implementation notes:
+
+- A query is dated by `coalesce(START_TIME, CREATED_AT)`. Days are grouped with the custom HQL function
+  `spt_date(ts)` (`'yyyy-MM-dd'`): SQLite `substr(ts,1,10)`, Oracle `to_char(ts,'YYYY-MM-DD')`. Do **not** use
+  HQL `day()`: the SQLite community dialect renders it as `strftime('%d')+1`.
+- Aggregation is done in HQL with group-by projections and finished in Java; results are small (per day /
+  hour / group / user), so no reporting tables are needed. For very large logs add a daily summary table.
+- Savings use the run rate of the 30 days before adoption (runs per day) × per-run saving × the adopted days
+  within the period. CPU, rows and table scans need the metric on both sides; an item without it contributes 0.
+- User groups come from `SPT_USER_DIRECTORY` (`/api/users`, CSV upload); unmapped users fall into
+  *Unassigned*.
+
+Global search: `GET /api/search?q=` matches `T-12`, `#5` / `G-5`, a number (tracker, group or seq id) or SQL
+text.
+
+---
+
+## 10. Dropdown values (`lookup/`)
+
+`SPT_LOOKUP (CATEGORY, LOOKUP_VALUE, SORT_ORDER, TONE, ACTIVE)` holds the values of the tracker dropdowns.
+`LookupService.TRACKER_FIELDS` maps each tracker property to its category:
+
+| Category | Tracker field |
+|---|---|
+| `THEME` | `theme` |
+| `DEV_TEAM_STATUS` | `devTeamStatus` |
+| `OPTIMIZED_SQL_STATUS` | `optimizedSqlStatus` |
+| `CLOUDERA_POST_RUN_VALIDATION` | `clouderaPostRunValidation` |
+| `SME_VALIDATION` | `smeValidation` |
+| `INSTALL_STATUS` / `EXECUTE_STATUS` / `VALIDATION_STATUS` | `installStatus` / `executeStatus` / `validationStatus` |
+| `ENVIRONMENT` | `environment` |
+| `REJECTION_REASON` | feedback / iteration `rejectionReason` |
+
+Updates are validated against the category's values (active or not; an empty category accepts anything),
+so deactivating a value only hides it from the dropdowns and never blocks saving old items. `TONE` (`ok`,
+`warn`, `bad`, `info`, `muted`) colours the chips. Seed values are in `V4__analytics_and_iterations.sql`; change them in
+Administration → Dropdown values. To make another field a dropdown: add a category to the map, seed it, and
+use `LookupStore.options(category, current)` in the form.
+
+---
+
+## 11. Frontend
 
 - Standalone components, signals for state, zoneless change detection. Anything rendered from an async
   callback must live in a `signal` (plain fields only refresh on user events).
 - `core/api.ts` is the single HTTP client; `errorInterceptor` shows RFC 9457 problem details in a snackbar.
 - Theme: Material 3 tokens with CSS `light-dark()`; `ThemeService` sets `color-scheme` on `<html>`.
-  App tokens (`--spt-*`) live in `styles.scss`. Never hard-code colours in components.
+  App tokens (`--spt-*`) live in `styles.scss`. Never hard-code colours in components. `light-dark()` only
+  accepts colours: build gradients and shadows from colour tokens (see `--spt-appbar`).
+- Navigation: Overview (Command center `home`, `insights`), Tuning (`pipeline`, `tracker`), Data (`groups`,
+  `logs`), Settings (`admin`). The app bar holds the global search and *New tuning request*.
+- Dropdowns read their values through `LookupStore` (`core/lookups.ts`), cached once per session and reloaded
+  after edits in Administration. Stage labels and order come from `core/stages.ts`.
+
+### Charts
+
+`shared/charts.ts` has small SVG components with no chart library: `ColumnChart`, `BarList`, `LineChart`,
+`StatTile` and `ChartCard`. Rules:
+
+- Colours are the validated categorical slots `--chart-1..3` (blue, orange, green), checked for colour-vision
+  separation and contrast against both surfaces (`#ffffff`, `#13223a`). Slot 3 is below 3:1 in light mode, so
+  **every `ChartCard` has a table view** with the exact values; pass `[table]`.
+- One series per chart where possible; a legend for 2+ series; values and labels use text tokens, not
+  series colours; every mark has a hover tooltip; never two y-axes.
+- Charts resize with their container (`ResizeObserver` in the `Responsive` base directive).
 
 ### AG Grid Enterprise
 
@@ -196,11 +334,12 @@ All grid setup lives in `src/app/shared/grid.ts`:
 - **Master/detail:** Query Groups use `masterDetail` with `GroupDetailRow` as detail renderer (it embeds the
   `GroupMembers` grid).
 - **Renderers:** `LinkCell` (router links that don't trigger the row click), `StatusCell`.
-- Tracker layout (order / width / visibility / pinning) is stored in `localStorage` under `spt.tracker.grid`.
+- Tracker layout (order / width / visibility / pinning) is stored in `localStorage` under `tracker.grid.v2`
+  (bump the key when the default columns change).
 
 ---
 
-## 9. Configuration reference (`spt.*`)
+## 12. Configuration reference (`spt.*`)
 
 | Property | Default | |
 |---|---|---|
@@ -221,20 +360,22 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 
 ---
 
-## 10. Testing & quality gates
+## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 16 tests incl. end-to-end ingestion / de-duplication on SQLite
+cd backend && mvn test                     # 19 tests incl. ingestion / de-duplication and the tuning lifecycle on SQLite
 cd frontend && npx ng test --watch=false   # Vitest
 cd frontend && npx ng build                # production build + bundle budgets
 ```
 
 `IngestionFlowTest` covers: header aliases, derived durations, rejected rows, grouping, tracker creation,
 identical-file re-load, overlapping files and in-file duplicates. Add a case there for any ingestion change.
+`TuningLifecycleTest` covers request → diagnostics → iterations → select → reject → adopt, every insight
+endpoint, and recovery of rows left ungrouped by an interrupted import.
 
 ---
 
-## 11. Build & deploy
+## 14. Build & deploy
 
 ```bash
 cd frontend && npm ci && npx ng build      # static files in frontend/dist/frontend/browser
@@ -250,7 +391,7 @@ Impala log pulls need the Cloudera Impala JDBC driver on the classpath (internal
 
 ---
 
-## 12. Conventions
+## 15. Conventions
 
 - Java: constructor injection, records for DTOs, Lombok only for entity getters/setters, problem details
   for errors, no business logic in controllers beyond mapping.

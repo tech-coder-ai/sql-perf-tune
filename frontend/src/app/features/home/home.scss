@@ -1,0 +1,65 @@
+.date-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--spt-panel);
+  border: 1px solid var(--spt-border);
+  border-radius: 8px;
+  padding: 0 4px;
+
+  input {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 6px;
+    color-scheme: inherit;
+  }
+}
+
+.tiles {
+  grid-template-columns: 1.6fr repeat(5, minmax(150px, 1fr));
+}
+
+@media (max-width: 1300px) {
+  .tiles {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+.second {
+  margin-top: 16px;
+}
+
+.pat {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--spt-muted);
+  border: 1px solid var(--spt-border);
+  border-radius: 4px;
+  padding: 0 4px;
+
+  &.new {
+    color: var(--spt-accent);
+    border-color: var(--spt-accent);
+  }
+}
+
+.sql {
+  font-family: var(--spt-mono);
+  font-size: 11.5px;
+  color: var(--spt-muted);
+  max-width: 460px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}

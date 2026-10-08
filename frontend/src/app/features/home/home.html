@@ -1,0 +1,143 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Command center</h1>
+      <div class="subtitle">Bad queries of the day and where the tuning backlog stands</div>
+    </div>
+    <span class="spacer"></span>
+    <div class="date-nav">
+      <button mat-icon-button (click)="shift(-1)" aria-label="Previous day"><mat-icon>chevron_left</mat-icon></button>
+      <input type="date" [value]="date()" (change)="setDate($any($event.target).value)" aria-label="Day" />
+      <button mat-icon-button (click)="shift(1)" [disabled]="isToday()" aria-label="Next day"><mat-icon>chevron_right</mat-icon></button>
+    </div>
+    <a mat-stroked-button routerLink="/insights"><mat-icon>insights</mat-icon> All insights</a>
+  </div>
+
+  @if (daily(); as d) {
+    <div class="tiles">
+      <app-stat-tile
+        class="hero-tile"
+        [hero]="true"
+        q="Q1"
+        icon="report"
+        [label]="isToday() ? 'Bad queries today' : 'Bad queries on ' + d.date"
+        [value]="num(d.badQueries)"
+        [delta]="delta(d)"
+        [deltaGood]="d.badQueries < d.badQueriesPreviousDay ? true : d.badQueries > d.badQueriesPreviousDay ? false : null"
+        [hint]="minutesText(d.totalMinutes) + ' of run time'"
+        link="/logs"
+      />
+      <app-stat-tile
+        q="Q2"
+        icon="replay"
+        label="Recurring"
+        [value]="num(d.recurringQueries)"
+        [hint]="recurringShare(d) + ' of the day · ' + d.recurringPatterns + ' known patterns'"
+        link="/groups"
+      />
+      <app-stat-tile
+        q="Q3"
+        icon="account_tree"
+        label="Query patterns"
+        [value]="num(d.patterns)"
+        [hint]="d.newPatterns + ' new · ' + d.repeatedTodayPatterns + ' ran more than once'"
+        link="/groups"
+      />
+      @if (pipeline(); as p) {
+        <app-stat-tile
+          q="Q6"
+          icon="pending_actions"
+          label="Outstanding patterns"
+          [value]="num(p.outstanding.patterns)"
+          [hint]="num(p.outstanding.badQueries) + ' bad queries not yet tuned'"
+          link="/pipeline"
+        />
+        <app-stat-tile
+          q="Q15"
+          icon="hourglass_top"
+          label="Awaiting adoption"
+          [value]="num(p.outstanding.awaitingAdoptionPatterns)"
+          [hint]="p.rejections.total + ' rejections in 90 days'"
+          link="/pipeline"
+        />
+      }
+      @if (savings(); as s) {
+        <app-stat-tile
+          q="Q5"
+          icon="savings"
+          label="Saved this month"
+          [value]="minutesText(s.minutesSaved)"
+          [hint]="s.adoptedInPeriod + ' adopted this month · ' + s.adoptedTotal + ' in total'"
+          link="/insights"
+          [query]="null"
+        />
+      }
+    </div>
+
+    <div class="grid-2">
+      <app-chart-card
+        q="Q8"
+        title="Bad queries by hour"
+        [answer]="peakText(d)"
+        [table]="{ headers: ['Hour', 'Bad queries'], rows: d.byHour.map(h => [h.label + ':00', h.count]) }"
+      >
+        <app-column-chart [data]="hourData()" [highlight]="d.peakHour" unit="bad queries" ariaLabel="Bad queries by hour" />
+      </app-chart-card>
+
+      <app-chart-card
+        title="Tuning pipeline"
+        answer="Click a stage to open it on the pipeline board"
+        [table]="{ headers: ['Stage', 'Items'], rows: stageRows().map(r => [r.label, r.value]) }"
+      >
+        <app-bar-list [rows]="stageRows()" [clickable]="true" (pick)="openStage($event)" />
+      </app-chart-card>
+    </div>
+
+    <div class="grid-2 second">
+      <app-chart-card q="Q3" title="Top query patterns of the day" [answer]="'Instances per pattern; total is across all loads'">
+        <table class="simple">
+          <tr>
+            <th>Pattern</th>
+            <th class="num">Today</th>
+            <th class="num">Total</th>
+            <th>Stage</th>
+          </tr>
+          @for (p of d.topPatterns; track p.groupId) {
+            <tr class="clickable" [routerLink]="p.trackerId ? ['/tracker', p.trackerId] : ['/groups', p.groupId]">
+              <td>
+                <div class="pat">
+                  <span class="mono">#{{ p.groupId }}</span>
+                  @if (p.recurring) {
+                    <span class="tag" matTooltip="Seen on earlier days">recurring</span>
+                  } @else {
+                    <span class="tag new">new</span>
+                  }
+                </div>
+                <div class="sql">{{ p.sqlSnippet }}</div>
+              </td>
+              <td class="num">{{ num(p.count) }}</td>
+              <td class="num">{{ num(p.totalInstances) }}</td>
+              <td>
+                @if (p.status) {
+                  <app-status [value]="p.status" />
+                } @else {
+                  <span class="muted">not tracked</span>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="muted">No bad queries on this day.</td></tr>
+          }
+        </table>
+      </app-chart-card>
+
+      <app-chart-card
+        title="Last 14 days"
+        answer="Bad queries per day"
+        [table]="{ headers: ['Day', 'Bad queries'], rows: d.last14Days.map(x => [x.label, x.count]) }"
+      >
+        <app-column-chart [data]="dayData()" [highlight]="13" unit="bad queries" ariaLabel="Bad queries per day" />
+      </app-chart-card>
+    </div>
+  }
+</div>

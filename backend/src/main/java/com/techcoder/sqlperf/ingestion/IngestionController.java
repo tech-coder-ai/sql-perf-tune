@@ -35,18 +35,30 @@ public class IngestionController {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("The uploaded file is empty");
         }
-        return service.importFile(file.getOriginalFilename(), file, sqlEngine);
+        return service.submitFile(file.getOriginalFilename(), file, sqlEngine);
     }
 
     /** Pull new rows from a configured Oracle / Impala data source. */
     @PostMapping("/pull/{dataSourceId}")
     public IngestionBatch pull(@PathVariable Long dataSourceId) {
-        return service.pull(dataSourceId);
+        return service.submitPull(dataSourceId);
     }
 
     @GetMapping("/batches")
     public List<IngestionBatch> batches() {
         return batches.findAll(Sort.by(Sort.Direction.DESC, "id"));
+    }
+
+    /** Progress / result of one import (poll while status is RUNNING). */
+    @GetMapping("/batches/{id}")
+    public IngestionBatch batch(@PathVariable Long id) {
+        return batches.findById(id).orElseThrow(() -> new com.techcoder.sqlperf.common.NotFoundException("Import", id));
+    }
+
+    /** Stops a running import after the current row; what was loaded so far is kept and grouped. */
+    @PostMapping("/batches/{id}/cancel")
+    public IngestionBatch cancel(@PathVariable Long id) {
+        return service.cancel(id);
     }
 
     /** Distinct files loaded so far with their load counts. */

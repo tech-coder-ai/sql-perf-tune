@@ -32,12 +32,18 @@ public class ImpalaProfileParser {
 
     public record ParsedProfile(String queryId, Map<String, String> summary, List<String> warnings,
                                 Map<String, Double> timelineSeconds, String execSummary,
-                                Double executionSeconds, Double teardownSeconds, Double totalSeconds) {
+                                Double executionSeconds, Double teardownSeconds, Double totalSeconds,
+                                Double cpuSeconds, Integer tablesScanned, Long rowsScanned, Double peakMemoryMb) {
     }
+
+    private static final Pattern PER_NODE_TIME = Pattern.compile("^\\s*Per Node (User|System) Time:\\s*(.*)$");
+    private static final Pattern PAREN_DURATION = Pattern.compile("\\(([0-9][0-9a-zμ.]*)\\)");
+    private static final Pattern COUNT = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)([KMB]?)$");
+    private static final Pattern MEMORY = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*(B|KB|MB|GB|TB)$");
 
     public ParsedProfile parse(String raw) {
         if (raw == null || raw.isBlank()) {
-            return new ParsedProfile(null, Map.of(), List.of(), Map.of(), null, null, null, null);
+            return new ParsedProfile(null, Map.of(), List.of(), Map.of(), null, null, null, null, null, null, null, null);
         }
         String[] lines = raw.split("\\R");
         Map<String, String> summary = new LinkedHashMap<>();
@@ -53,8 +59,22 @@ public class ImpalaProfileParser {
 
         boolean inTimeline = false;
         boolean inExec = false;
+        double cpu = 0;
+        boolean cpuSeen = false;
         for (String line : lines) {
             String trimmed = line.trim();
+            Matcher pn = PER_NODE_TIME.matcher(line);
+            if (pn.matches()) {
+                Matcher d = PAREN_DURATION.matcher(pn.group(2));
+                while (d.find()) {
+                    Double secs = toSeconds(d.group(1));
+                    if (secs != null) {
+                        cpu += secs;
+                        cpuSeen = true;
+                    }
+                }
+                continue;
+            }
             if (trimmed.startsWith("ExecSummary:")) {
                 inExec = true;
                 inTimeline = false;
@@ -108,8 +128,94 @@ public class ImpalaProfileParser {
         }
         Double teardown = execution != null && total != null && total >= execution
                 ? Math.round((total - execution) * 1000d) / 1000d : null;
-        return new ParsedProfile(queryId, summary, warnings, timeline,
-                exec.isEmpty() ? null : exec.toString().stripTrailing(), execution, teardown, total);
+        String execText = exec.isEmpty() ? null : exec.toString().stripTrailing();
+        ScanStats scans = scanStats(execText);
+        return new ParsedProfile(queryId, summary, warnings, timeline, execText, execution, teardown, total,
+                cpuSeen ? Math.round(cpu * 1000d) / 1000d : null, scans.tables(), scans.rows(), scans.peakMb());
+    }
+
+    record ScanStats(Integer tables, Long rows, Double peakMb) {
+    }
+
+    /**
+     * From the ExecSummary table: number of scan operators (tables scanned), rows they returned and the
+     * largest per-operator peak memory. Columns are located by header name, cells split on 2+ spaces.
+     */
+    static ScanStats scanStats(String execSummary) {
+        if (execSummary == null) {
+            return new ScanStats(null, null, null);
+        }
+        String[] lines = execSummary.split("\\R");
+        List<String> header = null;
+        int tables = 0;
+        long rows = 0;
+        boolean anyRows = false;
+        Double peak = null;
+        for (String line : lines) {
+            if (line.isBlank() || line.trim().startsWith("---")) {
+                continue;
+            }
+            List<String> cells = List.of(line.trim().split("\\s{2,}"));
+            if (header == null) {
+                if (line.contains("Operator") && line.contains("#Rows")) {
+                    header = cells;
+                }
+                continue;
+            }
+            String op = cells.getFirst();
+            int rowsIdx = header.indexOf("#Rows");
+            int memIdx = header.indexOf("Peak Mem");
+            if (memIdx >= 0 && memIdx < cells.size()) {
+                Double mb = toMegabytes(cells.get(memIdx));
+                if (mb != null && (peak == null || mb > peak)) {
+                    peak = mb;
+                }
+            }
+            if (op.toUpperCase(Locale.ROOT).contains("SCAN")) {
+                tables++;
+                if (rowsIdx >= 0 && rowsIdx < cells.size()) {
+                    Long n = toCount(cells.get(rowsIdx));
+                    if (n != null) {
+                        rows += n;
+                        anyRows = true;
+                    }
+                }
+            }
+        }
+        return new ScanStats(header == null ? null : tables, anyRows ? rows : null,
+                peak == null ? null : Math.round(peak * 100d) / 100d);
+    }
+
+    /** "1.2B" / "3.50K" / "42" -> count. */
+    static Long toCount(String v) {
+        Matcher m = COUNT.matcher(v.trim());
+        if (!m.matches()) {
+            return null;
+        }
+        double n = Double.parseDouble(m.group(1));
+        double mult = switch (m.group(2)) {
+            case "K" -> 1e3;
+            case "M" -> 1e6;
+            case "B" -> 1e9;
+            default -> 1;
+        };
+        return Math.round(n * mult);
+    }
+
+    /** "128.0 MB" / "4.1 GB" -> megabytes. */
+    static Double toMegabytes(String v) {
+        Matcher m = MEMORY.matcher(v.trim());
+        if (!m.matches()) {
+            return null;
+        }
+        double n = Double.parseDouble(m.group(1));
+        return switch (m.group(2)) {
+            case "B" -> n / (1024 * 1024);
+            case "KB" -> n / 1024;
+            case "MB" -> n;
+            case "GB" -> n * 1024;
+            default -> n * 1024 * 1024;
+        };
     }
 
     private static Double first(Map<String, Double> timeline, String... keys) {

@@ -1,6 +1,6 @@
 import { Tracker } from '../../core/models';
 
-export type ColKind = 'id' | 'num' | 'minutes' | 'seconds' | 'pct' | 'sql' | 'text' | 'longtext' | 'status' | 'mono' | 'ts';
+export type ColKind = 'id' | 'num' | 'minutes' | 'seconds' | 'pct' | 'sql' | 'text' | 'longtext' | 'status' | 'mono' | 'ts' | 'days';
 
 export interface TrackerColumn {
   key: string;
@@ -14,8 +14,11 @@ export interface TrackerColumn {
 /** Column order follows the tracking-screen specification. */
 export const TRACKER_COLUMNS: TrackerColumn[] = [
   { key: 'groupId', label: 'Group ID', kind: 'id', sort: 'groupId', visible: true },
-  { key: 'workflowStatus', label: 'Status', kind: 'status', sort: 'workflowStatus', visible: true },
+  { key: 'workflowStatus', label: 'Stage', kind: 'status', sort: 'workflowStatus', visible: true },
+  { key: 'daysInStage', label: 'Days in stage', kind: 'days', visible: true },
   { key: 'priority', label: 'Priority', kind: 'status', sort: 'priority', visible: true },
+  { key: 'requestSource', label: 'Source', kind: 'status', sort: 'requestSource', visible: true },
+  { key: 'iterationCount', label: 'Iterations', kind: 'num', visible: true },
   { key: 'groupSize', label: 'Group size', kind: 'num', sort: 'group.groupSize', visible: true },
   { key: 'distinctUsers', label: 'Distinct users', kind: 'num', sort: 'group.distinctUsers', visible: true },
   { key: 'fingerprint', label: 'Fingerprint', kind: 'mono', visible: false },
@@ -52,6 +55,17 @@ export const TRACKER_COLUMNS: TrackerColumn[] = [
   { key: 'changes', label: 'Changes', kind: 'longtext', visible: false },
   { key: 'problem', label: 'Problem', kind: 'longtext', visible: false },
   { key: 'recommendations', label: 'Recommendations', kind: 'longtext', visible: false },
+  { key: 'ogCpuSeconds', label: 'OG CPU time', kind: 'seconds', visible: false },
+  { key: 'postRunCpuSeconds', label: 'Post-run CPU time', kind: 'seconds', visible: false },
+  { key: 'ogTablesScanned', label: 'OG tables scanned', kind: 'num', visible: false },
+  { key: 'postRunTablesScanned', label: 'Post-run tables scanned', kind: 'num', visible: false },
+  { key: 'ogRowsScanned', label: 'OG rows scanned', kind: 'num', visible: false },
+  { key: 'postRunRowsScanned', label: 'Post-run rows scanned', kind: 'num', visible: false },
+  { key: 'requestedBy', label: 'Requested by', kind: 'text', sort: 'requestedBy', visible: false },
+  { key: 'environment', label: 'Environment', kind: 'text', sort: 'environment', visible: false },
+  { key: 'firstSeen', label: 'First seen', kind: 'ts', visible: false },
+  { key: 'adoptedAt', label: 'Adopted', kind: 'ts', sort: 'adoptedAt', visible: true },
+  { key: 'daysOpen', label: 'Days open', kind: 'days', visible: false },
   { key: 'updatedAt', label: 'Updated', kind: 'ts', sort: 'updatedAt', visible: false },
   { key: 'updatedBy', label: 'Updated by', kind: 'text', visible: false },
 ];

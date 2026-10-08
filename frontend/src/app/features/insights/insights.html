@@ -1,0 +1,359 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Insights</h1>
+      <div class="subtitle">Answers to the tuning programme's questions. Every card has a table view (top right) for exact values.</div>
+    </div>
+  </div>
+
+  <div class="controls panel">
+    <div class="ctl">
+      <span class="ctl-label">Day <span class="muted">(Q1–Q4, Q8)</span></span>
+      <input type="date" [value]="day()" (change)="setDay($any($event.target).value)" aria-label="Day" />
+    </div>
+    <div class="ctl">
+      <span class="ctl-label">Period <span class="muted">(Q5, Q7, Q9, Q11, Q13, Q15)</span></span>
+      <mat-button-toggle-group [value]="preset" (change)="setPreset($event.value)" hideSingleSelectionIndicator aria-label="Period">
+        <mat-button-toggle value="7d">7 days</mat-button-toggle>
+        <mat-button-toggle value="30d">30 days</mat-button-toggle>
+        <mat-button-toggle value="mtd">Month to date</mat-button-toggle>
+        <mat-button-toggle value="90d">90 days</mat-button-toggle>
+        <mat-button-toggle value="custom">Custom</mat-button-toggle>
+      </mat-button-toggle-group>
+      @if (preset === 'custom') {
+        <input type="date" [(ngModel)]="from" aria-label="From" />
+        <span class="muted">to</span>
+        <input type="date" [(ngModel)]="to" aria-label="To" />
+        <button mat-stroked-button (click)="loadAll()">Apply</button>
+      } @else {
+        <span class="muted">{{ from }} – {{ to }}</span>
+      }
+    </div>
+    <div class="ctl">
+      <span class="ctl-label">Trend <span class="muted">(Q10, Q14)</span></span>
+      <mat-select [(value)]="months" (selectionChange)="loadAll()" class="small-select" aria-label="Months">
+        <mat-option [value]="6">6 months</mat-option>
+        <mat-option [value]="12">12 months</mat-option>
+        <mat-option [value]="24">24 months</mat-option>
+      </mat-select>
+    </div>
+    <div class="ctl">
+      <span class="ctl-label">Theme window <span class="muted">(Q12)</span></span>
+      <mat-select [(value)]="themeDays" (selectionChange)="loadAll()" class="small-select" aria-label="Theme window">
+        <mat-option [value]="7">Last 7 days</mat-option>
+        <mat-option [value]="30">Last 30 days</mat-option>
+        <mat-option [value]="90">Last 90 days</mat-option>
+      </mat-select>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="index panel">
+      @for (s of sections; track s.title) {
+        <div class="index-title">{{ s.title }}</div>
+        @for (q of s.questions; track q.q) {
+          <button class="index-item" (click)="go(q.anchor)">
+            <span class="q">{{ q.q }}</span><span>{{ q.text }}</span>
+          </button>
+        }
+      }
+    </aside>
+
+    <div class="content">
+      <!-- ============================================================ TODAY -->
+      <h2 class="group-title">Today <span class="muted">· {{ day() }}</span></h2>
+      @if (daily(); as d) {
+        <div class="grid-2">
+          <app-chart-card
+            anchor="q1"
+            q="Q1"
+            title="How many bad queries did we see?"
+            [answer]="q1Answer(d)"
+            [table]="{ headers: ['Day', 'Bad queries'], rows: d.last14Days.map(x => [x.label, x.count]) }"
+            note="One bad query = one row of the daily bad query injection, dated by its start time."
+          >
+            <app-column-chart [data]="q1Days()" [highlight]="13" unit="bad queries" ariaLabel="Bad queries, last 14 days" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q2"
+            q="Q2"
+            title="How many were recurring?"
+            [answer]="num(d.recurringQueries) + ' of ' + num(d.badQueries) + ' bad queries (' + (d.badQueries ? (d.recurringQueries * 100 / d.badQueries | number: '1.0-0') : 0) + '%) belong to patterns already seen on earlier days.'"
+            [table]="tableOf(q2Rows(d), 'Count')"
+            note="Recurring = the query's pattern (same SQL ignoring filters) was seen before this day."
+          >
+            <app-bar-list [rows]="q2Rows(d)" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q3"
+            q="Q3"
+            title="How many instances per query pattern?"
+            [answer]="num(d.patterns) + ' patterns this day; the table lists the busiest with their all-time instances.'"
+            [table]="{ headers: ['Pattern', 'This day', 'All time', 'Stage'], rows: d.topPatterns.map(p => ['#' + p.groupId, p.count, p.totalInstances, p.status ? stage[p.status].label : 'not tracked']) }"
+          >
+            <div class="sub-title">Patterns by number of instances this day</div>
+            <app-column-chart [data]="q3Buckets()" [height]="150" unit="patterns" ariaLabel="Patterns by instances" />
+            <table class="simple top-table">
+              <tr><th>Pattern</th><th class="num">This day</th><th class="num">All time</th><th>Stage</th></tr>
+              @for (p of d.topPatterns.slice(0, 6); track p.groupId) {
+                <tr class="clickable" [routerLink]="p.trackerId ? ['/tracker', p.trackerId] : ['/groups', p.groupId]">
+                  <td class="item-cell"><span class="mono">#{{ p.groupId }}</span> <span class="sql">{{ p.sqlSnippet }}</span></td>
+                  <td class="num">{{ num(p.count) }}</td>
+                  <td class="num">{{ num(p.totalInstances) }}</td>
+                  <td>@if (p.status) {<app-status [value]="p.status" />} @else {<span class="muted">not tracked</span>}</td>
+                </tr>
+              }
+            </table>
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q8"
+            q="Q8"
+            title="Which hour has the most bad queries?"
+            [answer]="q8Answer(d)"
+            [table]="{ headers: ['Hour', 'Bad queries'], rows: d.byHour.map(h => [h.label + ':00', h.count]) }"
+          >
+            <app-column-chart [data]="q8Hours()" [highlight]="d.peakHour" unit="bad queries" ariaLabel="Bad queries by hour" />
+          </app-chart-card>
+        </div>
+      }
+
+      <!-- ============================================================ OUTCOMES -->
+      <h2 class="group-title">Tuning outcomes <span class="muted">· {{ from }} – {{ to }}</span></h2>
+      @if (pipeline(); as p) {
+        <div class="grid-2">
+          <app-chart-card
+            anchor="q4"
+            q="Q4"
+            [title]="'Bad SQL of ' + p.priorDay.date + ': optimized or not?'"
+            [answer]="p.priorDay.optimizedPatterns + ' of ' + p.priorDay.patterns + ' patterns are optimized; of the ' + p.priorDay.notOptimizedPatterns + ' not optimized, ' + p.priorDay.categorizedPatterns + ' have a theme.'"
+            [table]="tableOf(q4Rows(p), 'Patterns')"
+            note="Optimized = has a tested, selected or adopted iteration (stage Candidate ready or later)."
+          >
+            <app-bar-list [rows]="q4Rows(p)" />
+            @if (p.priorDay.themes.length) {
+              <div class="sub-title">Not optimized, by theme</div>
+              <app-bar-list [rows]="q4ThemeRows(p)" [slot]="2" />
+            }
+          </app-chart-card>
+
+          @if (savings(); as s) {
+            <app-chart-card
+              anchor="q5"
+              q="Q5"
+              title="Adopted tuned SQL and savings"
+              [answer]="q5Answer(s)"
+              [table]="{ headers: ['Week', 'Minutes saved', 'CPU seconds saved', 'Adopted'], rows: s.byWeek.map(w => [w.label, w.minutesSaved, w.cpuSecondsSaved, w.adopted]) }"
+              [note]="s.method"
+            >
+              <div class="mini-tiles">
+                <div><span>Wall clock saved</span><b>{{ minutesText(s.minutesSaved) }}</b></div>
+                <div><span>Impala CPU saved</span><b>{{ secondsText(s.cpuSecondsSaved) }}</b></div>
+                <div><span>Rows scanned avoided</span><b>{{ num(s.rowsScannedReduced) }}</b></div>
+                <div><span>Table scans avoided</span><b>{{ num(s.tableScansAvoided) }}</b></div>
+              </div>
+              <div class="sub-title">Wall-clock minutes saved per week</div>
+              <app-column-chart [data]="q5Weeks()" [height]="160" [slot]="3" unit="minutes saved" ariaLabel="Minutes saved per week" />
+            </app-chart-card>
+
+            <app-chart-card
+              anchor="q11"
+              q="Q11"
+              title="Impact of adopted fixes by theme / project"
+              answer="Runs per day of the original SQL before vs after adoption, and the estimated time saved."
+              [table]="{ headers: ['Theme', 'Adopted', 'Avg improvement %', 'Minutes saved', 'Runs/day before', 'Runs/day after'], rows: s.themes.map(t => [t.theme, t.adoptedItems, t.avgImprovementPct, t.minutesSaved, t.baselineRunsPerDay, t.runsPerDayAfter]) }"
+            >
+              <table class="simple">
+                <tr>
+                  <th>Theme</th><th class="num">Adopted</th><th class="num">Avg gain</th><th class="num">Saved</th><th class="num" title="Runs per day before → after adoption">Runs/day</th>
+                </tr>
+                @for (t of s.themes; track t.theme) {
+                  <tr>
+                    <td>{{ t.theme }}</td>
+                    <td class="num">{{ t.adoptedItems }}</td>
+                    <td class="num">{{ t.avgImprovementPct === null ? '—' : t.avgImprovementPct + '%' }}</td>
+                    <td class="num">{{ minutesText(t.minutesSaved) }}</td>
+                    <td class="num nowrap">
+                      {{ t.baselineRunsPerDay }} → <b [class.good]="t.runsPerDayAfter < t.baselineRunsPerDay">{{ t.runsPerDayAfter }}</b>
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr><td colspan="5" class="muted">No adopted items yet.</td></tr>
+                }
+              </table>
+              @if (s.items.length) {
+                <div class="sub-title">Top adopted items</div>
+                <table class="simple">
+                  <tr><th>Item</th><th class="num">Per run</th><th class="num">Runs/day</th><th class="num">Saved</th></tr>
+                  @for (i of s.items.slice(0, 5); track i.trackerId) {
+                    <tr class="clickable" [routerLink]="['/tracker', i.trackerId]">
+                      <td class="item-cell"><span class="mono">T-{{ i.trackerId }}</span> <span class="sql">{{ i.sqlSnippet }}</span></td>
+                      <td class="num">{{ minutesText(i.perRunMinutesSaved) }}</td>
+                      <td class="num">{{ i.baselineRunsPerDay }}</td>
+                      <td class="num">{{ minutesText(i.minutesSaved) }}</td>
+                    </tr>
+                  }
+                </table>
+              }
+            </app-chart-card>
+          }
+
+          <app-chart-card
+            anchor="q15"
+            q="Q15"
+            title="Waiting for adoption; rejected optimizations"
+            [answer]="p.awaitingAdoption.length + ' waiting for users. ' + p.rejections.total + ' rejections in the period, ' + p.rejections.inaccurate + ' for inaccurate results.'"
+            [table]="tableOf(q15Rows(p), 'Rejections')"
+          >
+            <div class="sub-title">Waiting for adoption (oldest first)</div>
+            <table class="simple">
+              <tr><th>Item</th><th class="num">Waiting</th><th class="num">Gain</th><th>Lead</th></tr>
+              @for (a of p.awaitingAdoption.slice(0, 6); track a.trackerId) {
+                <tr class="clickable" [routerLink]="['/tracker', a.trackerId]">
+                  <td class="item-cell"><span class="mono">T-{{ a.trackerId }}</span> <span class="sql">{{ a.sqlSnippet }}</span></td>
+                  <td class="num" [class.warn]="(a.daysWaiting ?? 0) > 14">{{ a.daysWaiting ?? '—' }} d</td>
+                  <td class="num">{{ a.improvementPct === null ? '—' : a.improvementPct + '%' }}</td>
+                  <td class="nowrap">{{ a.devTeamLead ?? '—' }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="muted">Nothing waiting.</td></tr>
+              }
+            </table>
+            <div class="sub-title">Rejections by reason</div>
+            <app-bar-list [rows]="q15Rows(p)" [slot]="2" />
+            @if (p.rejections.latest.length) {
+              <div class="sub-title">Latest rejections</div>
+              <table class="simple">
+                @for (r of p.rejections.latest.slice(0, 5); track $index) {
+                  <tr class="clickable" [routerLink]="r.trackerId ? ['/tracker', r.trackerId] : ['/groups', r.groupId]">
+                    <td class="nowrap">{{ r.at.substring(0, 10) }}</td>
+                    <td><b>{{ r.reason ?? 'No reason' }}</b><div class="muted">{{ r.comments }}</div></td>
+                    <td class="muted nowrap">{{ r.by }}</td>
+                  </tr>
+                }
+              </table>
+            }
+          </app-chart-card>
+        </div>
+
+        <!-- ============================================================ BACKLOG -->
+        <h2 class="group-title">Backlog & priorities</h2>
+        <div class="grid-2">
+          <app-chart-card
+            anchor="q6"
+            q="Q6"
+            title="How many bad queries are outstanding?"
+            [answer]="num(p.outstanding.patterns) + ' patterns are not tuned yet, covering ' + num(p.outstanding.badQueries) + ' bad queries.'"
+            [table]="tableOf(q6Rows(p), 'Patterns')"
+            note="Outstanding = every pattern with bad queries that is not adopted."
+          >
+            <app-bar-list [rows]="q6Rows(p)" [clickable]="true" />
+            <div class="links">
+              <a mat-button routerLink="/groups" [queryParams]="{ tracked: 'false' }"><mat-icon>account_tree</mat-icon> Untracked patterns</a>
+              <a mat-button routerLink="/pipeline"><mat-icon>view_kanban</mat-icon> Pipeline board</a>
+            </div>
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q12"
+            q="Q12"
+            title="Which theme should we work on next?"
+            [answer]="themes().length ? 'Work on “' + themes()[0].theme + '” first: about ' + minutesText(themes()[0].potentialMinutesPerMonth) + ' per month could be saved.' : 'No outstanding bad queries in the window.'"
+            [table]="{ headers: ['Rank', 'Theme', 'Patterns', 'Bad queries', 'Minutes', 'Expected gain %', 'Basis', 'Potential min/month'], rows: themes().map(t => [t.rank, t.theme, t.outstandingPatterns, t.badQueries, t.minutes, t.expectedImprovementPct, t.improvementBasis, t.potentialMinutesPerMonth]) }"
+            [note]="'Potential = run time of the theme’s untuned patterns over the last ' + themeDays + ' days, scaled to a month, × the average gain of adopted items in that theme (or overall, or 50% when there is no history).'"
+          >
+            <app-bar-list [rows]="q12Rows()" [slot]="3" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q9"
+            q="Q9"
+            title="End-to-end turnaround time"
+            [answer]="p.turnaround.adoptedItems + ' items adopted in the period: ' + (p.turnaround.avgDays ?? '—') + ' days on average from tracker to adoption (median ' + (p.turnaround.medianDays ?? '—') + ', 90% within ' + (p.turnaround.p90Days ?? '—') + ').'"
+            [table]="tableOf(q9Rows(p), 'Average days')"
+          >
+            <div class="mini-tiles">
+              <div><span>Average</span><b>{{ p.turnaround.avgDays ?? '—' }} d</b></div>
+              <div><span>Median</span><b>{{ p.turnaround.medianDays ?? '—' }} d</b></div>
+              <div><span>From first detection</span><b>{{ p.turnaround.avgDaysFromDetection ?? '—' }} d</b></div>
+              <div><span>Open items · avg age</span><b>{{ p.turnaround.openItems }} · {{ p.turnaround.avgOpenAgeDays ?? '—' }} d</b></div>
+            </div>
+            <div class="sub-title">Average days spent per stage (adopted items)</div>
+            <app-bar-list [rows]="q9Rows(p)" [slot]="2" />
+          </app-chart-card>
+        </div>
+      }
+
+      <!-- ============================================================ USERS -->
+      <h2 class="group-title">Users <span class="muted">· {{ from }} – {{ to }}</span></h2>
+      @if (users(); as u) {
+        <div class="grid-2">
+          <app-chart-card
+            anchor="q7"
+            q="Q7"
+            title="Which user groups / users have the most bad queries?"
+            [answer]="u.groups.length ? '“' + u.groups[0].userGroup + '” has the most: ' + num(u.groups[0].badQueries) + ' bad queries (' + u.groups[0].sharePct + '%).' : 'No bad queries in the period.'"
+            [table]="{ headers: ['User group', 'Users', 'Bad queries', 'Patterns', 'Share %'], rows: u.groups.map(g => [g.userGroup, g.users, g.badQueries, g.patterns, g.sharePct]) }"
+            [note]="u.unmappedUsers ? u.unmappedUsers + ' users have no user group yet. Map them under Administration → Users & groups.' : null"
+          >
+            <div class="sub-title">By user group</div>
+            <app-bar-list [rows]="q7GroupRows(u)" />
+            <div class="sub-title">Top users</div>
+            <app-bar-list [rows]="q7UserRows(u)" [slot]="2" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q13"
+            q="Q13"
+            title="Which users always have bad SQL?"
+            [answer]="'Consistency = days with bad queries ÷ ' + u.daysInRange + ' days. Users flagged “repeat” had bad queries on at least half of the days.'"
+            [table]="{ headers: ['User', 'Group', 'Bad queries', 'Patterns', 'Active days', 'Consistency %', 'Avg minutes', 'Repeat'], rows: u.users.map(x => [x.userId, x.userGroup, x.badQueries, x.patterns, x.activeDays, x.consistencyPct, x.avgMinutes, x.repeatOffender ? 'yes' : '']) }"
+            note="Suggested follow-up for repeat users: review their top patterns together, share the adopted rewrites, and add their SQL to UAT proactive tuning."
+          >
+            <table class="simple">
+              <tr><th>User</th><th class="num">Bad queries</th><th class="num">Patterns</th><th class="num">Consistency</th><th></th></tr>
+              @for (x of u.users.slice(0, 12); track x.userId) {
+                <tr class="clickable" [routerLink]="['/logs']" [queryParams]="{ userId: x.userId }">
+                  <td>
+                    {{ x.displayName ?? x.userId }}
+                    <div class="muted small">{{ x.userGroup ?? 'no user group' }}</div>
+                  </td>
+                  <td class="num">{{ num(x.badQueries) }}</td>
+                  <td class="num">{{ x.patterns }}</td>
+                  <td class="num">
+                    <div class="meter"><div [style.width.%]="x.consistencyPct"></div></div>
+                    {{ x.consistencyPct }}%
+                  </td>
+                  <td>@if (x.repeatOffender) {<app-status value="REJECTED" text="repeat" />}</td>
+                </tr>
+              }
+            </table>
+          </app-chart-card>
+        </div>
+      }
+
+      <!-- ============================================================ TRENDS -->
+      <h2 class="group-title">Trends <span class="muted">· last {{ months }} months</span></h2>
+      @if (trends(); as t) {
+        <div class="grid-2">
+          <app-chart-card anchor="q10" q="Q10" title="Month over month: are we reducing outstanding bad queries?" [answer]="q10Answer(t)" [table]="trendTable(t)">
+            <app-line-chart [series]="q10Series()" [labels]="q10Labels()" ariaLabel="Outstanding, new and adopted patterns per month" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q14"
+            q="Q14"
+            title="Proactively tuned (UAT) vs user tuning requests"
+            [answer]="sourceLabel.PROACTIVE_UAT + ': ' + t.requestsTotal.PROACTIVE_UAT + ' (' + t.requestsAdopted.PROACTIVE_UAT + ' adopted) · ' + sourceLabel.USER_REQUEST + ': ' + t.requestsTotal.USER_REQUEST + ' (' + t.requestsAdopted.USER_REQUEST + ' adopted) · ' + sourceLabel.LOG_DETECTED + ': ' + t.requestsTotal.LOG_DETECTED"
+            [table]="requestTable(t)"
+            note="Register proactive and user requests with “New tuning request” in the top bar."
+          >
+            <app-line-chart [series]="q14Series()" [labels]="q10Labels()" ariaLabel="Tuning items created per month by source" />
+          </app-chart-card>
+        </div>
+      }
+    </div>
+  </div>
+</div>

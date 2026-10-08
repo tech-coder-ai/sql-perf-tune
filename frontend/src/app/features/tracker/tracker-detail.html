@@ -1,192 +1,448 @@
 @if (model(); as m) {
+  @let t = saved()!;
   <div class="page">
     <div class="page-header">
-      <a mat-icon-button routerLink="/tracker" aria-label="Back to tracker"><mat-icon>arrow_back</mat-icon></a>
-      <div>
-        <h1>T-{{ m.trackerId }} · Group #{{ m.groupId }}</h1>
+      <a mat-icon-button routerLink="/pipeline" aria-label="Back to pipeline" matTooltip="Back to pipeline"><mat-icon>arrow_back</mat-icon></a>
+      <div class="head-text">
+        <h1>
+          T-{{ t.trackerId }}
+          <app-status [value]="t.workflowStatus" />
+          <app-status [value]="t.priority" />
+          @if (t.requestSource !== 'LOG_DETECTED') {
+            <app-status [value]="t.requestSource" />
+          }
+        </h1>
         <div class="subtitle">
-          Updated {{ saved()?.updatedAt | ts }} by {{ saved()?.updatedBy || saved()?.createdBy || '—' }} · version {{ m.version }}
+          <a class="link" [routerLink]="['/groups', t.groupId]">Group #{{ t.groupId }}</a>
+          · {{ t.theme ?? 'no theme yet' }} · {{ t.groupSize }} runs by {{ t.distinctUsers }} users
+          · updated {{ t.updatedAt | ts }} by {{ t.updatedBy || t.createdBy || '—' }}
         </div>
       </div>
-      <app-status [value]="saved()?.workflowStatus" />
-      <app-status [value]="saved()?.priority" />
       <span class="spacer"></span>
-      <a mat-stroked-button [routerLink]="['/groups', m.groupId]"><mat-icon>arrow_downward</mat-icon> Group workflow</a>
-      <a mat-stroked-button routerLink="/logs" [queryParams]="{ groupId: m.groupId }"><mat-icon>receipt_long</mat-icon> Log rows</a>
+      @switch (t.workflowStatus) {
+        @case ('SME_VALIDATION') {
+          <button mat-stroked-button class="danger" (click)="decide('REJECTED')"><mat-icon>block</mat-icon> Reject</button>
+          <button mat-flat-button (click)="decide('ADOPTED')"><mat-icon>verified</mat-icon> Mark adopted</button>
+        }
+        @case ('ADOPTED') {}
+        @case ('REJECTED') {}
+        @default {
+          <a mat-stroked-button [routerLink]="['/groups', t.groupId]"><mat-icon>troubleshoot</mat-icon> Diagnostics & AI agent</a>
+          <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> Add iteration</button>
+          @if (best(); as b) {
+            <button mat-flat-button (click)="select(b)" [disabled]="b.selected">
+              <mat-icon>star</mat-icon> Select best (#{{ b.iterationNo }})
+            </button>
+          }
+        }
+      }
     </div>
 
-    <div class="kv-grid">
-      <div class="kv"><div class="k">Group size</div><div class="v">{{ m.groupSize }}</div></div>
-      <div class="kv"><div class="k">Distinct users</div><div class="v">{{ m.distinctUsers }}</div></div>
-      <div class="kv"><div class="k">Avg / Min / Max</div><div class="v">{{ m.avgDurationMinutes | minutes }} · {{ m.minDurationMinutes | minutes }} · {{ m.maxDurationMinutes | minutes }}</div></div>
-      <div class="kv"><div class="k">Total duration</div><div class="v">{{ m.totalDurationMinutes | minutes }}</div></div>
-      <div class="kv"><div class="k">Run time improvement</div><div class="v" [class.good]="(saved()?.improvementPct ?? 0) > 0">{{ saved()?.improvementPct ?? '—' }}{{ saved()?.improvementPct !== null ? ' %' : '' }}</div></div>
-      <div class="kv"><div class="k">Sample seq ID</div><div class="v">{{ m.sampleQuerySeqId ?? '—' }}</div></div>
-    </div>
+    <section class="card journey-card">
+      <app-journey [journey]="journey()" />
+      @if (nextStep()) {
+        <div class="next"><mat-icon>tips_and_updates</mat-icon><span><b>Next step:</b> {{ nextStep() }}</span></div>
+      }
+    </section>
 
-    <form #f="ngForm" (ngSubmit)="save(f)">
-      <div class="save-bar" [class.dirty]="f.dirty">
-        <span>{{ f.dirty ? 'Unsaved changes' : 'All changes saved' }}</span>
-        <span class="spacer"></span>
-        <button mat-button type="button" (click)="discard(f)" [disabled]="!f.dirty">Discard</button>
-        <button mat-flat-button type="submit" [disabled]="!f.dirty || f.invalid || saving()"><mat-icon>save</mat-icon> Save</button>
-      </div>
-
-      <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs">
-        <mat-tab label="Tracking">
-          <div class="tab-body">
-            <div class="section-title">Workflow & ownership</div>
-            <div class="form-grid">
-              <mat-form-field>
-                <mat-label>Workflow status</mat-label>
-                <mat-select name="workflowStatus" [(ngModel)]="m.workflowStatus">
-                  @for (s of statuses; track s) {
-                    <mat-option [value]="s">{{ s.replaceAll('_', ' ') }}</mat-option>
-                  }
-                </mat-select>
-              </mat-form-field>
-              <mat-form-field>
-                <mat-label>Priority</mat-label>
-                <mat-select name="priority" [(ngModel)]="m.priority">
-                  @for (p of priorities; track p) {
-                    <mat-option [value]="p">{{ p }}</mat-option>
-                  }
-                </mat-select>
-              </mat-form-field>
-              <mat-form-field><mat-label>Theme</mat-label><input matInput name="theme" [(ngModel)]="m.theme" /></mat-form-field>
-              <mat-form-field><mat-label>Dev team lead</mat-label><input matInput name="devTeamLead" [(ngModel)]="m.devTeamLead" /></mat-form-field>
-              <mat-form-field><mat-label>Dev team status</mat-label><input matInput name="devTeamStatus" [(ngModel)]="m.devTeamStatus" /></mat-form-field>
-              <mat-form-field><mat-label>Cloudera team lead</mat-label><input matInput name="clouderaTeamLead" [(ngModel)]="m.clouderaTeamLead" /></mat-form-field>
-              <mat-form-field><mat-label>SME team lead</mat-label><input matInput name="smeTeamLead" [(ngModel)]="m.smeTeamLead" /></mat-form-field>
-              <mat-form-field><mat-label>Optimized SQL (status)</mat-label><input matInput name="optimizedSqlStatus" [(ngModel)]="m.optimizedSqlStatus" /></mat-form-field>
-              <mat-form-field><mat-label>Cloudera post-run validation</mat-label><input matInput name="clouderaPostRunValidation" [(ngModel)]="m.clouderaPostRunValidation" /></mat-form-field>
-              <mat-form-field><mat-label>SME validation</mat-label><input matInput name="smeValidation" [(ngModel)]="m.smeValidation" /></mat-form-field>
-              <mat-form-field><mat-label>Install</mat-label><input matInput name="installStatus" [(ngModel)]="m.installStatus" /></mat-form-field>
-              <mat-form-field><mat-label>Execute</mat-label><input matInput name="executeStatus" [(ngModel)]="m.executeStatus" /></mat-form-field>
-              <mat-form-field><mat-label>Validation</mat-label><input matInput name="validationStatus" [(ngModel)]="m.validationStatus" /></mat-form-field>
+    <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs" [selectedIndex]="tab()" (selectedIndexChange)="tab.set($event)">
+      <!-- ======================================================== OVERVIEW -->
+      <mat-tab label="Overview">
+        <div class="tab-body overview">
+          <div class="card compare">
+            <div class="card-title">Before / after</div>
+            <div class="card-sub">
+              Original run vs the
+              @if (selected(); as s) {
+                selected iteration #{{ s.iterationNo }}
+              } @else {
+                post-run values (no iteration selected yet)
+              }
             </div>
+            <table class="simple">
+              <tr><th>Metric</th><th class="num">Original</th><th class="num">Tuned</th><th class="num">Change</th></tr>
+              @for (r of metrics(); track r.label) {
+                @let c = change(r);
+                <tr>
+                  <td>{{ r.label }}</td>
+                  <td class="num">{{ r.fmt(r.og) }}</td>
+                  <td class="num">{{ r.fmt(r.post) }}</td>
+                  <td class="num" [class.good]="c.good === true" [class.bad]="c.good === false">{{ c.text }}</td>
+                </tr>
+              }
+            </table>
+          </div>
+          <div class="card facts">
+            <div class="card-title">Facts</div>
+            <dl>
+              <dt>Source</dt><dd>{{ sourceLabel[t.requestSource] }}@if (t.requestedBy) { · {{ t.requestedBy }} }</dd>
+              <dt>Environment</dt><dd>{{ t.environment ?? '—' }}</dd>
+              <dt>First / last seen</dt><dd>{{ t.firstSeen | ts }} / {{ t.lastSeen | ts }}</dd>
+              <dt>Runs · users</dt><dd>{{ num(t.groupSize) }} · {{ t.distinctUsers }}</dd>
+              <dt>Avg / max run</dt><dd>{{ t.avgDurationMinutes | minutes }} / {{ t.maxDurationMinutes | minutes }}</dd>
+              <dt>Total run time</dt><dd>{{ t.totalDurationMinutes | minutes }}</dd>
+              <dt>Dev / Cloudera / SME lead</dt><dd>{{ t.devTeamLead ?? '—' }} / {{ t.clouderaTeamLead ?? '—' }} / {{ t.smeTeamLead ?? '—' }}</dd>
+              <dt>Iterations</dt><dd>{{ t.iterationCount }}</dd>
+              <dt>Days open</dt><dd>{{ t.daysOpen ?? '—' }}</dd>
+            </dl>
+          </div>
+          <div class="card span-2">
+            <div class="card-title">Problem & recommendations</div>
+            <p class="pre">{{ t.problem || 'No problem description yet.' }}</p>
+            @if (t.recommendations) {
+              <p class="pre muted">{{ t.recommendations }}</p>
+            }
+          </div>
+        </div>
+      </mat-tab>
 
-            <div class="section-title">Before / after metrics</div>
-            <div class="form-grid">
-              <mat-form-field><mat-label>OG run duration (min)</mat-label><input matInput type="number" min="0" name="ogRunDurationMinutes" [(ngModel)]="m.ogRunDurationMinutes" /></mat-form-field>
-              <mat-form-field><mat-label>Post-run duration (min)</mat-label><input matInput type="number" min="0" name="postRunDurationMinutes" [(ngModel)]="m.postRunDurationMinutes" /></mat-form-field>
-              <mat-form-field><mat-label>OG execution time (s)</mat-label><input matInput type="number" min="0" name="ogExecutionTimeSeconds" [(ngModel)]="m.ogExecutionTimeSeconds" /></mat-form-field>
-              <mat-form-field><mat-label>Post-run execution time (s)</mat-label><input matInput type="number" min="0" name="postRunExecutionTimeSeconds" [(ngModel)]="m.postRunExecutionTimeSeconds" /></mat-form-field>
-              <mat-form-field><mat-label>OG teardown time (s)</mat-label><input matInput type="number" min="0" name="ogTeardownTimeSeconds" [(ngModel)]="m.ogTeardownTimeSeconds" /></mat-form-field>
-              <mat-form-field><mat-label>Post-run teardown time (s)</mat-label><input matInput type="number" min="0" name="postRunTeardownTimeSeconds" [(ngModel)]="m.postRunTeardownTimeSeconds" /></mat-form-field>
-              <mat-form-field>
-                <mat-label>OG teardown %</mat-label>
-                <input matInput type="number" min="0" name="ogTeardownPct" [(ngModel)]="m.ogTeardownPct" />
-                <mat-hint>Leave empty to derive from teardown / run duration</mat-hint>
-              </mat-form-field>
-              <mat-form-field>
-                <mat-label>Post-run teardown %</mat-label>
-                <input matInput type="number" min="0" name="postRunTeardownPct" [(ngModel)]="m.postRunTeardownPct" />
-              </mat-form-field>
-            </div>
+      <!-- ======================================================== ITERATIONS -->
+      <mat-tab [label]="'Iterations (' + iterations().length + ')'">
+        <div class="tab-body">
+          <div class="iter-head">
+            <p class="muted">
+              Every tuning attempt with its test results. ★ marks the best: the fastest tested iteration whose results match the original.
+              Select it for adoption; if users reject it, try the next iteration.
+            </p>
+            <span class="spacer"></span>
+            <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
+          </div>
 
-            <div class="section-title">Analysis</div>
-            <div class="form-grid">
-              <mat-form-field class="span-all"><mat-label>Problem</mat-label><textarea matInput rows="3" name="problem" [(ngModel)]="m.problem"></textarea></mat-form-field>
-              <mat-form-field class="span-all"><mat-label>Changes</mat-label><textarea matInput rows="4" name="changes" [(ngModel)]="m.changes"></textarea></mat-form-field>
-              <mat-form-field class="span-all"><mat-label>Recommendations</mat-label><textarea matInput rows="3" name="recommendations" [(ngModel)]="m.recommendations"></textarea></mat-form-field>
-            </div>
-
-            @if (customFields().length) {
-              <div class="section-title">Additional fields</div>
+          @if (newIteration) {
+            <div class="card new-iter">
+              <div class="card-title">New iteration</div>
               <div class="form-grid">
-                @for (cf of customFields(); track cf.id) {
-                  @switch (cf.dataType) {
-                    @case ('ENUM') {
-                      <mat-form-field>
-                        <mat-label>{{ cf.label }}</mat-label>
-                        <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
-                          <mat-option [value]="''">—</mat-option>
-                          @for (o of options(cf); track o) {
-                            <mat-option [value]="o">{{ o }}</mat-option>
-                          }
-                        </mat-select>
-                      </mat-form-field>
+                <mat-form-field class="span-all">
+                  <mat-label>Optimized SQL</mat-label>
+                  <textarea matInput rows="8" class="mono" [(ngModel)]="newIteration.optimizedSql" required></textarea>
+                </mat-form-field>
+                <mat-form-field class="span-all">
+                  <mat-label>What changed and why</mat-label>
+                  <textarea matInput rows="3" [(ngModel)]="newIteration.changeNarrative"></textarea>
+                </mat-form-field>
+              </div>
+              <div class="actions">
+                <button mat-button (click)="newIteration = null">Cancel</button>
+                <button mat-flat-button (click)="addIteration()" [disabled]="!newIteration.optimizedSql"><mat-icon>add</mat-icon> Add iteration</button>
+              </div>
+            </div>
+          }
+
+          <div class="table-wrap">
+            <table class="simple iter-table">
+              <tr>
+                <th></th>
+                <th>#</th>
+                <th>Status</th>
+                <th class="num">Run time</th>
+                <th class="num">Δ run</th>
+                <th class="num">CPU</th>
+                <th class="num">Δ CPU</th>
+                <th class="num">Rows scanned</th>
+                <th class="num">Tables</th>
+                <th>Results match</th>
+                <th>Tested</th>
+                <th></th>
+              </tr>
+              <tr class="baseline">
+                <td></td>
+                <td>Original</td>
+                <td></td>
+                <td class="num">{{ t.ogRunDurationMinutes | minutes }}</td>
+                <td></td>
+                <td class="num">{{ t.ogCpuSeconds ?? '—' }}{{ t.ogCpuSeconds !== null ? ' s' : '' }}</td>
+                <td></td>
+                <td class="num">{{ num(t.ogRowsScanned) }}</td>
+                <td class="num">{{ t.ogTablesScanned ?? '—' }}</td>
+                <td colspan="3" class="muted">baseline from the original diagnostics</td>
+              </tr>
+              @for (i of iterations(); track i.id) {
+                <tr [class.best-row]="i.best" [class.sel-row]="i.selected" [class.editing]="editing()?.id === i.id">
+                  <td class="star">
+                    @if (i.best) {
+                      <mat-icon matTooltip="Best iteration">star</mat-icon>
                     }
-                    @case ('BOOLEAN') {
-                      <mat-form-field>
-                        <mat-label>{{ cf.label }}</mat-label>
-                        <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
-                          <mat-option [value]="''">—</mat-option>
-                          <mat-option value="true">Yes</mat-option>
-                          <mat-option value="false">No</mat-option>
-                        </mat-select>
-                      </mat-form-field>
+                  </td>
+                  <td>
+                    <b>#{{ i.iterationNo }}</b>
+                    <div class="muted small">{{ i.source === 'AI_AGENT' ? 'AI agent' : 'manual' }}</div>
+                  </td>
+                  <td><app-status [value]="i.status" /></td>
+                  <td class="num">{{ i.runDurationMinutes | minutes }}</td>
+                  <td class="num" [class.good]="(i.durationImprovementPct ?? 0) > 0" [class.bad]="(i.durationImprovementPct ?? 0) < 0">
+                    {{ i.durationImprovementPct === null ? '—' : i.durationImprovementPct + '%' }}
+                  </td>
+                  <td class="num">{{ i.cpuSeconds ?? '—' }}{{ i.cpuSeconds !== null ? ' s' : '' }}</td>
+                  <td class="num" [class.good]="(i.cpuImprovementPct ?? 0) > 0">{{ i.cpuImprovementPct === null ? '—' : i.cpuImprovementPct + '%' }}</td>
+                  <td class="num">{{ num(i.rowsScanned) }}</td>
+                  <td class="num">
+                    {{ i.tablesScanned ?? '—' }}
+                    @if ((i.tableScansAvoided ?? 0) > 0) {
+                      <span class="good small">(−{{ i.tableScansAvoided }})</span>
                     }
-                    @case ('LONG_TEXT') {
-                      <mat-form-field class="span-all">
-                        <mat-label>{{ cf.label }}</mat-label>
-                        <textarea matInput rows="3" [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required"></textarea>
-                      </mat-form-field>
+                  </td>
+                  <td>
+                    @if (i.resultMatches === true) {
+                      <mat-icon class="good" matTooltip="Same results as the original">check_circle</mat-icon>
+                    } @else if (i.resultMatches === false) {
+                      <mat-icon class="bad" matTooltip="Results differ">cancel</mat-icon>
+                    } @else {
+                      <span class="muted">—</span>
                     }
-                    @default {
-                      <mat-form-field>
-                        <mat-label>{{ cf.label }}</mat-label>
-                        <input
-                          matInput
-                          [type]="cf.dataType === 'NUMBER' ? 'number' : cf.dataType === 'DATE' ? 'date' : 'text'"
-                          [name]="'cf_' + cf.fieldKey"
-                          [(ngModel)]="m.customFields[cf.fieldKey]"
-                          [required]="cf.required"
-                        />
-                      </mat-form-field>
+                  </td>
+                  <td class="small">{{ i.testedAt | ts }}</td>
+                  <td class="row-actions">
+                    <button mat-icon-button (click)="edit(i)" matTooltip="Open / enter test results" aria-label="Edit iteration"><mat-icon>edit</mat-icon></button>
+                    @if (i.status === 'TESTED' || i.status === 'PROPOSED') {
+                      <button mat-icon-button (click)="select(i)" matTooltip="Select for adoption" aria-label="Select for adoption"><mat-icon>how_to_reg</mat-icon></button>
                     }
+                    @if (i.status !== 'REJECTED' && i.status !== 'ADOPTED') {
+                      <button mat-icon-button (click)="decide('REJECTED', i)" matTooltip="Reject with reason" aria-label="Reject iteration"><mat-icon>block</mat-icon></button>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="12" class="muted">No iterations yet. Run the AI agent on the group page or add one manually.</td></tr>
+              }
+            </table>
+          </div>
+
+          @if (editing(); as e) {
+            <div class="card iter-edit">
+              <div class="card-title">Iteration #{{ e.iterationNo }} <app-status [value]="e.status" /></div>
+              <div class="grid-2">
+                <app-sql-block [text]="e.optimizedSql" label="Optimized SQL" maxHeight="320px" />
+                <div>
+                  <div class="card-sub">Change narrative</div>
+                  <p class="pre">{{ e.changeNarrative || '—' }}</p>
+                </div>
+              </div>
+              <div class="section-title">Test results</div>
+              <p class="muted small">
+                Filled automatically when a post-run profile is captured on the group page (Diagnostics → phase "Optimized");
+                or enter them here.
+              </p>
+              <div class="form-grid">
+                <mat-form-field><mat-label>Run duration (min)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.runDurationMinutes" /></mat-form-field>
+                <mat-form-field><mat-label>Execution time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.executionTimeSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Teardown time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.teardownTimeSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Impala CPU time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.cpuSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Rows scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.rowsScanned" /></mat-form-field>
+                <mat-form-field><mat-label>Tables scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.tablesScanned" /></mat-form-field>
+                <mat-form-field><mat-label>Peak memory (MB)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.peakMemoryMb" /></mat-form-field>
+                <mat-form-field><mat-label>Result row count</mat-label><input matInput type="number" min="0" [(ngModel)]="e.resultRowCount" /></mat-form-field>
+                <mat-form-field>
+                  <mat-label>Results match the original?</mat-label>
+                  <mat-select [(ngModel)]="e.resultMatches">
+                    <mat-option [value]="null">Not checked</mat-option>
+                    <mat-option [value]="true">Yes, identical</mat-option>
+                    <mat-option [value]="false">No, results differ</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field class="span-all"><mat-label>Notes</mat-label><textarea matInput rows="2" [(ngModel)]="e.notes"></textarea></mat-form-field>
+              </div>
+              <div class="actions">
+                <button mat-button (click)="editing.set(null)">Close</button>
+                <button mat-flat-button (click)="saveIteration()"><mat-icon>save</mat-icon> Save results</button>
+              </div>
+            </div>
+          }
+        </div>
+      </mat-tab>
+
+      <!-- ======================================================== TRACKING -->
+      <mat-tab label="Tracking">
+        <form #f="ngForm" (ngSubmit)="save(f)" class="tab-body">
+          <div class="save-bar" [class.dirty]="f.dirty">
+            <span>{{ f.dirty ? 'Unsaved changes' : 'All changes saved' }} · version {{ m.version }}</span>
+            <span class="spacer"></span>
+            <button mat-button type="button" (click)="discard(f)" [disabled]="!f.dirty">Discard</button>
+            <button mat-flat-button type="submit" [disabled]="!f.dirty || f.invalid || saving()"><mat-icon>save</mat-icon> Save</button>
+          </div>
+
+          <div class="section-title">Workflow & ownership</div>
+          <div class="form-grid">
+            <mat-form-field>
+              <mat-label>Stage</mat-label>
+              <mat-select name="workflowStatus" [(ngModel)]="m.workflowStatus">
+                @for (s of statuses; track s) {
+                  <mat-option [value]="s">{{ stage[s].label }}</mat-option>
+                }
+              </mat-select>
+              <mat-hint>Usually set automatically by the workflow</mat-hint>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Priority</mat-label>
+              <mat-select name="priority" [(ngModel)]="m.priority">
+                @for (p of priorities; track p) {
+                  <mat-option [value]="p">{{ p }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Theme</mat-label>
+              <mat-select name="theme" [(ngModel)]="m.theme">
+                <mat-option [value]="null">— not categorized —</mat-option>
+                @for (o of lookups.options('THEME', m.theme); track o) {
+                  <mat-option [value]="o">{{ o }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field>
+              <mat-label>Request source</mat-label>
+              <mat-select name="requestSource" [(ngModel)]="m.requestSource">
+                @for (s of sources; track s) {
+                  <mat-option [value]="s">{{ sourceLabel[s] }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field><mat-label>Requested by</mat-label><input matInput name="requestedBy" [(ngModel)]="m.requestedBy" /></mat-form-field>
+            <mat-form-field>
+              <mat-label>Environment</mat-label>
+              <mat-select name="environment" [(ngModel)]="m.environment">
+                <mat-option [value]="null">—</mat-option>
+                @for (o of lookups.options('ENVIRONMENT', m.environment); track o) {
+                  <mat-option [value]="o">{{ o }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field><mat-label>Dev team lead</mat-label><input matInput name="devTeamLead" [(ngModel)]="m.devTeamLead" /></mat-form-field>
+            <mat-form-field><mat-label>Cloudera team lead</mat-label><input matInput name="clouderaTeamLead" [(ngModel)]="m.clouderaTeamLead" /></mat-form-field>
+            <mat-form-field><mat-label>SME team lead</mat-label><input matInput name="smeTeamLead" [(ngModel)]="m.smeTeamLead" /></mat-form-field>
+          </div>
+
+          <div class="section-title">Team statuses</div>
+          <div class="form-grid">
+            @for (d of dropdowns; track d.field) {
+              <mat-form-field>
+                <mat-label>{{ d.label }}</mat-label>
+                <mat-select [name]="d.field" [ngModel]="get(m, d.field)" (ngModelChange)="set(m, d.field, $event)">
+                  <mat-option [value]="null">—</mat-option>
+                  @for (o of lookups.options(d.category, get(m, d.field)); track o) {
+                    <mat-option [value]="o">{{ o }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            }
+          </div>
+
+          <div class="section-title">Before / after metrics</div>
+          <p class="muted small">Original values come from the original diagnostics; tuned values from the selected iteration. Override here if needed.</p>
+          <div class="form-grid">
+            <mat-form-field><mat-label>OG run duration (min)</mat-label><input matInput type="number" min="0" name="ogRunDurationMinutes" [(ngModel)]="m.ogRunDurationMinutes" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run duration (min)</mat-label><input matInput type="number" min="0" name="postRunDurationMinutes" [(ngModel)]="m.postRunDurationMinutes" /></mat-form-field>
+            <mat-form-field><mat-label>OG execution time (s)</mat-label><input matInput type="number" min="0" name="ogExecutionTimeSeconds" [(ngModel)]="m.ogExecutionTimeSeconds" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run execution time (s)</mat-label><input matInput type="number" min="0" name="postRunExecutionTimeSeconds" [(ngModel)]="m.postRunExecutionTimeSeconds" /></mat-form-field>
+            <mat-form-field><mat-label>OG teardown time (s)</mat-label><input matInput type="number" min="0" name="ogTeardownTimeSeconds" [(ngModel)]="m.ogTeardownTimeSeconds" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run teardown time (s)</mat-label><input matInput type="number" min="0" name="postRunTeardownTimeSeconds" [(ngModel)]="m.postRunTeardownTimeSeconds" /></mat-form-field>
+            <mat-form-field>
+              <mat-label>OG teardown %</mat-label>
+              <input matInput type="number" min="0" name="ogTeardownPct" [(ngModel)]="m.ogTeardownPct" />
+              <mat-hint>Empty = teardown ÷ run duration</mat-hint>
+            </mat-form-field>
+            <mat-form-field><mat-label>Post-run teardown %</mat-label><input matInput type="number" min="0" name="postRunTeardownPct" [(ngModel)]="m.postRunTeardownPct" /></mat-form-field>
+            <mat-form-field><mat-label>OG CPU time (s)</mat-label><input matInput type="number" min="0" name="ogCpuSeconds" [(ngModel)]="m.ogCpuSeconds" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run CPU time (s)</mat-label><input matInput type="number" min="0" name="postRunCpuSeconds" [(ngModel)]="m.postRunCpuSeconds" /></mat-form-field>
+            <mat-form-field><mat-label>OG rows scanned</mat-label><input matInput type="number" min="0" name="ogRowsScanned" [(ngModel)]="m.ogRowsScanned" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run rows scanned</mat-label><input matInput type="number" min="0" name="postRunRowsScanned" [(ngModel)]="m.postRunRowsScanned" /></mat-form-field>
+            <mat-form-field><mat-label>OG tables scanned</mat-label><input matInput type="number" min="0" name="ogTablesScanned" [(ngModel)]="m.ogTablesScanned" /></mat-form-field>
+            <mat-form-field><mat-label>Post-run tables scanned</mat-label><input matInput type="number" min="0" name="postRunTablesScanned" [(ngModel)]="m.postRunTablesScanned" /></mat-form-field>
+          </div>
+
+          <div class="section-title">Analysis</div>
+          <div class="form-grid">
+            <mat-form-field class="span-all"><mat-label>Problem</mat-label><textarea matInput rows="3" name="problem" [(ngModel)]="m.problem"></textarea></mat-form-field>
+            <mat-form-field class="span-all"><mat-label>Changes</mat-label><textarea matInput rows="4" name="changes" [(ngModel)]="m.changes"></textarea></mat-form-field>
+            <mat-form-field class="span-all"><mat-label>Recommendations</mat-label><textarea matInput rows="3" name="recommendations" [(ngModel)]="m.recommendations"></textarea></mat-form-field>
+          </div>
+
+          @if (customFields().length) {
+            <div class="section-title">Additional fields</div>
+            <div class="form-grid">
+              @for (cf of customFields(); track cf.id) {
+                @switch (cf.dataType) {
+                  @case ('ENUM') {
+                    <mat-form-field>
+                      <mat-label>{{ cf.label }}</mat-label>
+                      <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
+                        <mat-option [value]="''">—</mat-option>
+                        @for (o of options(cf); track o) {
+                          <mat-option [value]="o">{{ o }}</mat-option>
+                        }
+                      </mat-select>
+                    </mat-form-field>
+                  }
+                  @case ('BOOLEAN') {
+                    <mat-form-field>
+                      <mat-label>{{ cf.label }}</mat-label>
+                      <mat-select [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required">
+                        <mat-option [value]="''">—</mat-option>
+                        <mat-option value="true">Yes</mat-option>
+                        <mat-option value="false">No</mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                  }
+                  @case ('LONG_TEXT') {
+                    <mat-form-field class="span-all">
+                      <mat-label>{{ cf.label }}</mat-label>
+                      <textarea matInput rows="3" [name]="'cf_' + cf.fieldKey" [(ngModel)]="m.customFields[cf.fieldKey]" [required]="cf.required"></textarea>
+                    </mat-form-field>
+                  }
+                  @default {
+                    <mat-form-field>
+                      <mat-label>{{ cf.label }}</mat-label>
+                      <input
+                        matInput
+                        [type]="cf.dataType === 'NUMBER' ? 'number' : cf.dataType === 'DATE' ? 'date' : 'text'"
+                        [name]="'cf_' + cf.fieldKey"
+                        [(ngModel)]="m.customFields[cf.fieldKey]"
+                        [required]="cf.required"
+                      />
+                    </mat-form-field>
                   }
                 }
-              </div>
-            }
-          </div>
-        </mat-tab>
+              }
+            </div>
+          }
+        </form>
+      </mat-tab>
 
-        <mat-tab label="Queries">
-          <div class="tab-body two-col">
-            <app-sql-block [text]="m.sampleQueryRaw" label="Sample query (raw)" />
-            <app-sql-block [text]="m.optimizedQuery" label="Optimized query" />
-            <mat-form-field class="span-all">
-              <mat-label>Sample query (formatted)</mat-label>
-              <textarea matInput rows="10" class="mono" name="sampleQueryFormatted" [(ngModel)]="m.sampleQueryFormatted"></textarea>
-            </mat-form-field>
-            <mat-form-field class="span-all">
-              <mat-label>Cleansed query</mat-label>
-              <textarea matInput rows="5" class="mono" name="cleansedQuery" [(ngModel)]="m.cleansedQuery"></textarea>
-            </mat-form-field>
-            <mat-form-field class="span-all">
-              <mat-label>Optimized query</mat-label>
-              <textarea matInput rows="8" class="mono" name="optimizedQuery" [(ngModel)]="m.optimizedQuery"></textarea>
-            </mat-form-field>
-            <div class="span-all muted mono">fingerprint {{ m.fingerprint }} · row indices {{ m.rowIndices }}</div>
-          </div>
-        </mat-tab>
+      <!-- ======================================================== QUERIES -->
+      <mat-tab label="Queries">
+        <div class="tab-body grid-2">
+          <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="480px" />
+          <app-sql-block [text]="t.optimizedQuery" label="Optimized query (selected iteration)" maxHeight="480px" placeholder="No iteration selected yet" />
+          <app-sql-block [text]="t.cleansedQuery" label="Cleansed query" maxHeight="240px" />
+          <div class="muted mono small">fingerprint {{ t.fingerprint }}<br />row indices {{ t.rowIndices }}</div>
+        </div>
+      </mat-tab>
 
-        <mat-tab [label]="'Log rows (' + m.groupSize + ')'">
-          <div class="tab-body"><app-group-members [groupId]="m.groupId" /></div>
-        </mat-tab>
+      <mat-tab [label]="'Log rows (' + t.groupSize + ')'">
+        <div class="tab-body"><app-group-members [groupId]="t.groupId" /></div>
+      </mat-tab>
 
-        <mat-tab [label]="'History (' + history().length + ')'">
-          <div class="tab-body">
-            @for (h of history(); track h.id) {
-              <div class="history-item">
-                <div class="who"><b>{{ h.changedBy }}</b> <span class="muted">{{ h.changedAt | ts }}</span></div>
-                @if (h.action === 'CREATE') {
-                  <div>Added to tracker</div>
-                } @else {
-                  <div>
-                    <b>{{ fieldLabel(h.fieldName) }}</b>:
-                    <span class="old">{{ h.oldValue ?? '∅' }}</span> → <span class="new">{{ h.newValue ?? '∅' }}</span>
-                  </div>
-                }
-              </div>
-            } @empty {
-              <p class="muted">No changes recorded.</p>
-            }
-          </div>
-        </mat-tab>
-      </mat-tab-group>
-    </form>
+      <mat-tab [label]="'History (' + history().length + ')'">
+        <div class="tab-body">
+          @for (h of history(); track h.id) {
+            <div class="history-item">
+              <div class="who"><b>{{ h.changedBy }}</b> <span class="muted">{{ h.changedAt | ts }}</span></div>
+              @if (h.action === 'CREATE') {
+                <div>Added to the tracker</div>
+              } @else if (h.fieldName === 'iteration' || h.fieldName === 'selectedIteration') {
+                <div>{{ h.fieldName === 'selectedIteration' ? 'Selected for adoption: ' : '' }}{{ h.newValue }}</div>
+              } @else {
+                <div>
+                  <b>{{ fieldLabel(h.fieldName) }}</b>:
+                  <span class="old">{{ historyValue(h.fieldName, h.oldValue) }}</span> →
+                  <span class="new">{{ historyValue(h.fieldName, h.newValue) }}</span>
+                </div>
+              }
+            </div>
+          } @empty {
+            <p class="muted">No changes recorded.</p>
+          }
+        </div>
+      </mat-tab>
+    </mat-tab-group>
   </div>
 }

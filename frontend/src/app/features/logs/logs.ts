@@ -112,6 +112,7 @@ export class Logs implements OnInit {
     const qp = this.route.snapshot.queryParamMap;
     this.filter.groupId = qp.get('groupId') ? Number(qp.get('groupId')) : null;
     this.filter.batchId = qp.get('batchId') ? Number(qp.get('batchId')) : null;
+    this.filter.userId = qp.get('userId') ?? '';
   }
 
   onReady(e: GridReadyEvent<QueryLog>): void {

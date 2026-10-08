@@ -77,6 +77,17 @@
                     <mat-option value="OPTIMIZED">Optimized (post run)</mat-option>
                   </mat-select>
                 </mat-form-field>
+                @if (diag.phase === 'OPTIMIZED') {
+                  <mat-form-field>
+                    <mat-label>Iteration tested</mat-label>
+                    <mat-select name="iterationId" [(ngModel)]="diag.iterationId">
+                      <mat-option [value]="null">Latest iteration (or new from SQL text)</mat-option>
+                      @for (i of iterations(); track i.id) {
+                        <mat-option [value]="i.id">#{{ i.iterationNo }} · {{ i.status.toLowerCase() }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                }
                 <mat-form-field>
                   <mat-label>Status</mat-label>
                   <mat-select name="status" [(ngModel)]="diag.status">
@@ -223,6 +234,9 @@
             <div class="feedback">
               <app-status [value]="f.decision === 'ADOPTED' ? 'ADOPTED' : f.decision === 'REJECTED' ? 'REJECTED' : 'NEW'" />
               <b>{{ f.sourceRole.replace('_', ' ') }}</b>
+              @if (f.rejectionReason) {
+                <app-status value="REJECTED" [text]="f.rejectionReason" />
+              }
               <span class="muted">{{ f.createdBy }} · {{ f.createdAt | ts }} {{ f.optimizationRunId ? '· run #' + f.optimizationRunId : '' }}</span>
               <p>{{ f.comments }}</p>
             </div>
@@ -245,14 +259,24 @@
               </mat-select>
             </mat-form-field>
             <mat-form-field>
-              <mat-label>Optimization run</mat-label>
-              <mat-select name="optimizationRunId" [(ngModel)]="fb.optimizationRunId">
-                <mat-option [value]="null">—</mat-option>
-                @for (r of runs(); track r.id) {
-                  <mat-option [value]="r.id">Run #{{ r.id }}</mat-option>
+              <mat-label>Iteration</mat-label>
+              <mat-select name="iterationId" [(ngModel)]="fb.iterationId">
+                <mat-option [value]="null">Selected iteration</mat-option>
+                @for (i of iterations(); track i.id) {
+                  <mat-option [value]="i.id">#{{ i.iterationNo }} · {{ i.status.toLowerCase() }}</mat-option>
                 }
               </mat-select>
             </mat-form-field>
+            @if (fb.decision === 'REJECTED') {
+              <mat-form-field>
+                <mat-label>Rejection reason</mat-label>
+                <mat-select name="rejectionReason" [(ngModel)]="fb.rejectionReason" required>
+                  @for (r of lookups.options('REJECTION_REASON'); track r) {
+                    <mat-option [value]="r">{{ r }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            }
             <mat-form-field class="span-all">
               <mat-label>Comments</mat-label>
               <textarea matInput rows="3" name="comments" [(ngModel)]="fb.comments"></textarea>

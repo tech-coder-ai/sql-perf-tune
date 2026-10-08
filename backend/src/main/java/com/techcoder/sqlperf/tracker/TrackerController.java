@@ -36,7 +36,8 @@ public class TrackerController {
 
     private static final Set<String> SORTABLE = Set.of("id", "groupId", "workflowStatus", "priority", "theme",
             "devTeamLead", "devTeamStatus", "clouderaTeamLead", "smeTeamLead", "optimizedSqlStatus",
-            "ogRunDurationMinutes", "postRunDurationMinutes", "updatedAt", "createdAt",
+            "ogRunDurationMinutes", "postRunDurationMinutes", "updatedAt", "createdAt", "requestSource", "adoptedAt",
+            "stageChangedAt", "environment", "requestedBy",
             "group.groupSize", "group.distinctUsers", "group.avgDurationMinutes", "group.maxDurationMinutes",
             "group.minDurationMinutes", "group.totalDurationMinutes");
     private static final int EXPORT_LIMIT = 100_000;
@@ -61,8 +62,9 @@ public class TrackerController {
             @RequestParam(required = false) TuningTracker.Priority priority,
             @RequestParam(required = false) String theme,
             @RequestParam(required = false) String lead,
-            @RequestParam(required = false) Long groupId) {
-        var spec = spec(q, status, priority, theme, lead, groupId);
+            @RequestParam(required = false) Long groupId,
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource) {
+        var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource));
         var pageable = Paging.of(page, size, sort, SORTABLE,
                 Sort.by(Sort.Direction.DESC, "group.totalDurationMinutes").and(Sort.by("id")));
         var result = service.search(spec, pageable);
@@ -73,6 +75,30 @@ public class TrackerController {
     @GetMapping("/{id}")
     public TrackerDto get(@PathVariable Long id) {
         return service.get(id);
+    }
+
+    /** Stage-by-stage journey of one SQL until adoption. */
+    @GetMapping("/{id}/journey")
+    public TrackerService.Journey journey(@PathVariable Long id) {
+        return service.journey(id);
+    }
+
+    /** Pipeline board: every tracker item as a compact card (grouped by stage in the UI). */
+    @GetMapping("/board")
+    public List<TrackerService.BoardCard> board(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) TuningTracker.Priority priority,
+            @RequestParam(required = false) String theme,
+            @RequestParam(required = false) String lead,
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource) {
+        return service.board(Specs.all(spec(q, null, priority, theme, lead, null),
+                Specs.eq("requestSource", requestSource)));
+    }
+
+    /** New proactive (UAT) or user-requested tuning item from a pasted SQL. */
+    @PostMapping("/requests")
+    public TrackerDto request(@RequestBody TrackerService.TuningRequest req) {
+        return service.createRequest(req);
     }
 
     public record CreateRequest(@NotEmpty List<Long> groupIds) {
@@ -133,7 +159,7 @@ public class TrackerController {
         };
         Specification<TuningTracker> statusSpec = status == null || status.isEmpty() ? null
                 : (root, cq, cb) -> root.get("workflowStatus").in(status);
-        return Specs.all(text, leadSpec, statusSpec, Specs.eq("priority", priority), Specs.like("theme", theme),
+        return Specs.all(text, leadSpec, statusSpec, Specs.eq("priority", priority), Specs.eq("theme", Texts.trimToNull(theme)),
                 Specs.eq("groupId", groupId));
     }
 }

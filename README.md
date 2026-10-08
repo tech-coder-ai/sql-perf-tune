@@ -8,6 +8,11 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 - **Oracle** (shared environments) and **SQLite** (local development) schemas managed by Flyway
 - Every log row is processed **once**: repeated loads (same file or overlapping exports) are recognised,
   counted and kept in a load history, but never re-processed
+- Tuning in **iterations**: the best tested iteration is selected, then adopted or rejected (with a reason);
+  every SQL's **journey** through the stages is visible until it is adopted
+- **Insights** answer the programme's 15 questions: bad queries per day / hour, recurring patterns,
+  outstanding backlog, adoption, savings (wall clock, Impala CPU, rows and table scans), turnaround, trends,
+  themes and users
 
 | Document | For |
 |---|---|
@@ -19,11 +24,18 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 
 | Screen | What it shows |
 |---|---|
-| Dashboard | Logged queries, groups, total run time, top groups, tracker pipeline |
-| Query Logs | Raw log rows (seq_id … duration_minutes) with filters; import CSV / Excel or pull from Oracle / Impala |
+| Command center | Today's bad queries, recurring patterns, outstanding backlog, awaiting adoption, savings, bad queries by hour, pipeline |
+| Insights | The 15 questions (Q1–Q15), each with a chart and a table view, for a chosen day / period / trend window |
+| Pipeline board | Every tracked SQL as a card in its stage column (Triage → Diagnosed → Tuning → Candidate ready → Tested → Awaiting adoption → Adopted), with aging |
+| Query Logs | Raw log rows (seq_id … duration_minutes) with filters; import CSV / Excel or pull from Oracle / Impala in the background (progress, cancel) |
 | Query Groups | Same SQL minus WHERE filters grouped by fingerprint; expand a row to see its log rows; add groups to the tracker |
 | Group detail | Metrics, sample + normalized SQL, log rows, diagnostics (explain / profile / exec summary), DDL, optimization runs, feedback |
-| Tuning Tracker | All tracking columns, column chooser, drag-to-reorder / resize / pin (layout remembered per user), filters, Excel export; edit page with change history and drill-down |
+| Tuning Tracker | All tracking columns, column chooser, drag-to-reorder / resize / pin (layout remembered per user), filters, Excel export; item page with journey, next step, before/after, iterations, dropdown-backed tracking fields, history and drill-down |
+| Administration | Dropdown values, users & groups, data sources, custom columns, prompt templates, loaded files, import history |
+
+The UI uses an enterprise light-blue theme and a navy dark theme (or follows the OS). Global search in the
+app bar finds `T-12`, `#5`, a seq id or SQL text; *New tuning request* registers proactive (UAT) or user
+requests.
 
 All grids use **AG Grid Enterprise**: server-side row model (server paging / sorting), master/detail for
 query groups, columns side bar and header menus, cell range selection with clipboard, and context-menu Excel

@@ -12,8 +12,10 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { Api } from '../../core/api';
+import { LookupStore } from '../../core/lookups';
 import {
   Feedback,
+  Iteration,
   OptimizationRun,
   PromptTemplate,
   QueryGroup,
@@ -62,13 +64,22 @@ export class GroupDetail implements OnInit {
   readonly runs = signal<OptimizationRun[]>([]);
   readonly feedback = signal<Feedback[]>([]);
   readonly prompts = signal<PromptTemplate[]>([]);
+  readonly iterations = signal<Iteration[]>([]);
+  protected readonly lookups = inject(LookupStore);
   readonly busy = signal(false);
 
   diag = this.emptyDiag();
   ddl = { tableName: '', ddlText: '', rowCount: null as number | null };
   promptTemplateId: number | null = null;
   responses: Record<number, { text: string; model: string }> = {};
-  fb = { sourceRole: 'CLIENT_DEV', decision: 'COMMENT', comments: '', optimizationRunId: null as number | null };
+  fb = {
+    sourceRole: 'CLIENT_DEV',
+    decision: 'COMMENT',
+    comments: '',
+    optimizationRunId: null as number | null,
+    iterationId: null as number | null,
+    rejectionReason: null as string | null,
+  };
 
   readonly roles = ['BUSINESS_USER', 'CLIENT_DEV', 'CLOUDERA', 'SME'];
   readonly decisions = ['COMMENT', 'ADOPTED', 'REJECTED'];
@@ -96,6 +107,9 @@ export class GroupDetail implements OnInit {
       this.ddls.set(r.ddls);
       this.runs.set(r.runs);
       this.feedback.set(r.feedback);
+      if (r.group.trackerId) {
+        this.api.iterations(r.group.trackerId).subscribe((i) => this.iterations.set(i));
+      }
     });
   }
 
@@ -107,6 +121,7 @@ export class GroupDetail implements OnInit {
   private emptyDiag() {
     return {
       phase: 'ORIGINAL',
+      iterationId: null as number | null,
       queryId: '',
       sqlText: '',
       rowCount: null as number | null,
@@ -184,7 +199,7 @@ export class GroupDetail implements OnInit {
   // ---- feedback
   saveFeedback(): void {
     this.api.addFeedback(this.groupId, this.fb).subscribe(() => {
-      this.fb = { sourceRole: 'CLIENT_DEV', decision: 'COMMENT', comments: '', optimizationRunId: null };
+      this.fb = { sourceRole: 'CLIENT_DEV', decision: 'COMMENT', comments: '', optimizationRunId: null, iterationId: null, rejectionReason: null };
       this.reload();
     });
   }

@@ -38,6 +38,9 @@ public class TuningTracker {
 
     public enum Priority { LOW, MEDIUM, HIGH, CRITICAL }
 
+    /** Where the tuning request came from (Q14: proactive vs user requested vs detected in logs). */
+    public enum RequestSource { LOG_DETECTED, PROACTIVE_UAT, USER_REQUEST }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -80,6 +83,32 @@ public class TuningTracker {
     private Double postRunTeardownTimeSeconds;
     private Double ogTeardownPct;
     private Double postRunTeardownPct;
+    private Double ogCpuSeconds;
+    private Double postRunCpuSeconds;
+    private Long ogRowsScanned;
+    private Long postRunRowsScanned;
+    private Integer ogTablesScanned;
+    private Integer postRunTablesScanned;
+    private Long ogBytesScanned;
+    private Long postRunBytesScanned;
+    private Double ogPeakMemoryMb;
+    private Double postRunPeakMemoryMb;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private RequestSource requestSource = RequestSource.LOG_DETECTED;
+
+    private String requestedBy;
+    private String environment;
+
+    /** Iteration chosen as the best result (copied into the post-run metrics and optimized query). */
+    private Long selectedIterationId;
+
+    /** When the item entered its current workflow status. */
+    private LocalDateTime stageChangedAt;
+    private LocalDateTime adoptedAt;
+    /** Set when the item reaches ADOPTED or REJECTED. */
+    private LocalDateTime closedAt;
 
     private String theme;
     private String smeValidation;

@@ -1,8 +1,9 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject, input, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule, NgForm } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -12,13 +13,50 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { Api } from '../../core/api';
-import { AuditEvent, CustomField, PRIORITIES, Tracker, WORKFLOW_STATUSES } from '../../core/models';
+import { LookupStore } from '../../core/lookups';
+import {
+  AuditEvent,
+  CustomField,
+  Iteration,
+  Journey,
+  PRIORITIES,
+  REQUEST_SOURCES,
+  Tracker,
+  WORKFLOW_STATUSES,
+} from '../../core/models';
+import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
+import { minutesText, num, secondsText } from '../../shared/dates';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
+import { JourneyView } from '../../shared/journey';
 import { SqlBlock } from '../../shared/sql-block';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupMembers } from '../groups/group-members';
+import { DecisionDialog, DecisionData } from './decision-dialog';
 
-/** Edit form for one tracker item, with drill-down to the group and its log rows and full change history. */
+interface MetricRow {
+  label: string;
+  og: number | null;
+  post: number | null;
+  fmt: (v: number | null) => string;
+  /** lower is better */
+  lower: boolean;
+}
+
+/** Dropdown-backed tracker fields: property -> lookup category + label. */
+const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
+  { field: 'devTeamStatus', category: 'DEV_TEAM_STATUS', label: 'Dev team status' },
+  { field: 'optimizedSqlStatus', category: 'OPTIMIZED_SQL_STATUS', label: 'Optimized SQL' },
+  { field: 'clouderaPostRunValidation', category: 'CLOUDERA_POST_RUN_VALIDATION', label: 'Cloudera post-run validation' },
+  { field: 'smeValidation', category: 'SME_VALIDATION', label: 'SME validation' },
+  { field: 'installStatus', category: 'INSTALL_STATUS', label: 'Install' },
+  { field: 'executeStatus', category: 'EXECUTE_STATUS', label: 'Execute' },
+  { field: 'validationStatus', category: 'VALIDATION_STATUS', label: 'Validation' },
+];
+
+/**
+ * One SQL on its way to adoption: journey, before/after, tuning iterations (best one selected and adopted),
+ * tracking fields, queries, log rows and history.
+ */
 @Component({
   selector: 'app-tracker-detail',
   imports: [
@@ -35,6 +73,7 @@ import { GroupMembers } from '../groups/group-members';
     SqlBlock,
     StatusChip,
     GroupMembers,
+    JourneyView,
     MinutesPipe,
     TimestampPipe,
   ],
@@ -45,15 +84,82 @@ export class TrackerDetail implements OnInit {
   readonly id = input.required<string>();
   private readonly api = inject(Api);
   private readonly snack = inject(MatSnackBar);
+  private readonly dialog = inject(MatDialog);
+  protected readonly lookups = inject(LookupStore);
 
-  readonly statuses = WORKFLOW_STATUSES;
-  readonly priorities = PRIORITIES;
-  readonly saved = signal<Tracker | null>(null);
-  readonly history = signal<AuditEvent[]>([]);
-  readonly customFields = signal<CustomField[]>([]);
-  readonly saving = signal(false);
+  protected readonly statuses = WORKFLOW_STATUSES;
+  protected readonly priorities = PRIORITIES;
+  protected readonly sources = REQUEST_SOURCES;
+  protected readonly sourceLabel = REQUEST_SOURCE_LABEL;
+  protected readonly stage = STAGE;
+  protected readonly dropdowns = DROPDOWNS;
+  protected readonly num = num;
+
+  protected readonly saved = signal<Tracker | null>(null);
+  protected readonly journey = signal<Journey | null>(null);
+  protected readonly iterations = signal<Iteration[]>([]);
+  protected readonly history = signal<AuditEvent[]>([]);
+  protected readonly customFields = signal<CustomField[]>([]);
+  protected readonly saving = signal(false);
+  protected readonly tab = signal(0);
   /** working copy bound to the form (fields mutated in place by ngModel) */
-  readonly model = signal<Tracker | null>(null);
+  protected readonly model = signal<Tracker | null>(null);
+
+  /** iteration being edited in the Iterations tab (copy) */
+  protected readonly editing = signal<Iteration | null>(null);
+  protected newIteration: { optimizedSql: string; changeNarrative: string; notes: string } | null = null;
+
+  protected readonly best = computed(() => this.iterations().find((i) => i.best) ?? null);
+  protected readonly selected = computed(() => this.iterations().find((i) => i.selected) ?? null);
+
+  protected readonly metrics = computed<MetricRow[]>(() => {
+    const t = this.saved();
+    if (!t) return [];
+    return [
+      { label: 'Run duration', og: t.ogRunDurationMinutes, post: t.postRunDurationMinutes, fmt: minutesText, lower: true },
+      { label: 'Execution time', og: t.ogExecutionTimeSeconds, post: t.postRunExecutionTimeSeconds, fmt: secondsText, lower: true },
+      { label: 'Teardown time', og: t.ogTeardownTimeSeconds, post: t.postRunTeardownTimeSeconds, fmt: secondsText, lower: true },
+      { label: 'Impala CPU time', og: t.ogCpuSeconds, post: t.postRunCpuSeconds, fmt: secondsText, lower: true },
+      { label: 'Rows scanned', og: t.ogRowsScanned, post: t.postRunRowsScanned, fmt: num, lower: true },
+      { label: 'Tables scanned', og: t.ogTablesScanned, post: t.postRunTablesScanned, fmt: num, lower: true },
+      {
+        label: 'Peak memory',
+        og: t.ogPeakMemoryMb,
+        post: t.postRunPeakMemoryMb,
+        fmt: (v) => (v === null ? '—' : `${num(Math.round(v))} MB`),
+        lower: true,
+      },
+    ];
+  });
+
+  /** What the user should do next, by stage. */
+  protected readonly nextStep = computed(() => {
+    const t = this.saved();
+    if (!t) return null;
+    const best = this.best();
+    switch (t.workflowStatus) {
+      case 'NEW':
+        return 'Analyse the SQL: set a theme and capture the explain plan / profile of the original run on the group page.';
+      case 'DIAGNOSTICS_CAPTURED':
+        return 'Run the optimization agent on the group page or add a manual iteration with the rewritten SQL.';
+      case 'OPTIMIZATION_REQUESTED':
+        return 'Waiting for a candidate SQL: paste the agent answer or add a manual iteration.';
+      case 'OPTIMIZED':
+        return 'Test the candidate iteration(s): capture the post-run profile or enter the test results.';
+      case 'POST_RUN_VALIDATED':
+        return best
+          ? `Iteration #${best.iterationNo} is the best so far (${best.durationImprovementPct ?? '—'}% faster). Select it for adoption.`
+          : 'Compare the tested iterations and select the best one for adoption.';
+      case 'SME_VALIDATION':
+        return 'With the users / SMEs: record whether the selected iteration was adopted, or reject it with a reason.';
+      case 'ADOPTED':
+        return 'Adopted. Savings are counted in Insights (Q5) from the adoption date.';
+      case 'REJECTED':
+        return 'Closed without adoption.';
+      default:
+        return 'On hold.';
+    }
+  });
 
   ngOnInit(): void {
     this.load();
@@ -66,24 +172,22 @@ export class TrackerDetail implements OnInit {
       this.saved.set(t);
       this.model.set(this.copy(t));
     });
+    this.api.journey(id).subscribe((j) => this.journey.set(j));
+    this.api.iterations(id).subscribe((i) => this.iterations.set(i));
     this.api.trackerHistory(id).subscribe((h) => this.history.set(h));
   }
 
-  options(f: CustomField): string[] {
-    return (f.optionsCsv ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  }
+  // ------------------------------------------------------------------ tracking form
 
   save(form: NgForm): void {
     const m = this.model();
     if (!m || form.invalid) return;
     this.saving.set(true);
     this.api.updateTracker(m.trackerId, m).subscribe({
-      next: (t) => {
+      next: () => {
         this.saving.set(false);
-        this.saved.set(t);
-        this.model.set(this.copy(t));
         form.form.markAsPristine();
-        this.api.trackerHistory(t.trackerId).subscribe((h) => this.history.set(h));
+        this.load();
         this.snack.open('Saved', undefined, { duration: 2000 });
       },
       error: (e: HttpErrorResponse) => {
@@ -102,8 +206,86 @@ export class TrackerDetail implements OnInit {
     form.form.markAsPristine();
   }
 
-  private copy(t: Tracker): Tracker {
-    return structuredClone({ ...t, customFields: { ...(t.customFields ?? {}) } });
+  options(f: CustomField): string[] {
+    return (f.optionsCsv ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  get(m: Tracker, field: keyof Tracker): string | null {
+    return m[field] as string | null;
+  }
+
+  set(m: Tracker, field: keyof Tracker, v: string | null): void {
+    (m as unknown as Record<string, unknown>)[field] = v;
+  }
+
+  // ------------------------------------------------------------------ iterations
+
+  startNewIteration(): void {
+    this.tab.set(1);
+    this.newIteration = { optimizedSql: '', changeNarrative: '', notes: '' };
+  }
+
+  addIteration(): void {
+    const t = this.saved();
+    if (!t || !this.newIteration) return;
+    this.api.addIteration(t.trackerId, this.newIteration).subscribe((i) => {
+      this.newIteration = null;
+      this.snack.open(`Iteration #${i.iterationNo} added`, undefined, { duration: 2500 });
+      this.load();
+      this.edit(i);
+    });
+  }
+
+  edit(i: Iteration): void {
+    this.editing.set(structuredClone(i));
+  }
+
+  saveIteration(): void {
+    const t = this.saved();
+    const i = this.editing();
+    if (!t || !i) return;
+    this.api.updateIteration(t.trackerId, i.id, i).subscribe((u) => {
+      this.snack.open(`Iteration #${u.iterationNo} saved`, undefined, { duration: 2000 });
+      this.editing.set(null);
+      this.load();
+    });
+  }
+
+  select(i: Iteration): void {
+    const t = this.saved();
+    if (!t) return;
+    this.api.selectIteration(t.trackerId, i.id).subscribe(() => {
+      this.snack.open(`Iteration #${i.iterationNo} selected for adoption`, undefined, { duration: 3000 });
+      this.load();
+    });
+  }
+
+  decide(decision: 'ADOPTED' | 'REJECTED', iteration?: Iteration): void {
+    const t = this.saved();
+    if (!t) return;
+    const data: DecisionData = {
+      decision,
+      groupId: t.groupId,
+      iterations: this.iterations(),
+      iterationId: iteration?.id ?? this.selected()?.id ?? this.best()?.id ?? null,
+    };
+    this.dialog
+      .open(DecisionDialog, { data, width: '620px', maxWidth: '95vw' })
+      .afterClosed()
+      .subscribe((ok) => {
+        if (ok) {
+          this.snack.open(decision === 'ADOPTED' ? 'Marked as adopted' : 'Rejection recorded', undefined, { duration: 3000 });
+          this.load();
+        }
+      });
+  }
+
+  // ------------------------------------------------------------------ helpers
+
+  change(r: MetricRow): { text: string; good: boolean | null } {
+    if (r.og === null || r.post === null || r.og === 0) return { text: '—', good: null };
+    const pct = Math.round(((r.og - r.post) / r.og) * 1000) / 10;
+    return { text: `${pct > 0 ? '−' : '+'}${Math.abs(pct)}%`, good: r.lower ? pct > 0 : pct < 0 };
   }
 
   fieldLabel(name: string | null): string {
@@ -113,5 +295,15 @@ export class TrackerDetail implements OnInit {
       return this.customFields().find((f) => f.fieldKey === key)?.label ?? key;
     }
     return name.replace(/([A-Z])/g, ' $1').toLowerCase();
+  }
+
+  historyValue(field: string | null, v: string | null): string {
+    if (v === null) return '∅';
+    if (field === 'workflowStatus') return STAGE[v as keyof typeof STAGE]?.label ?? v;
+    return v;
+  }
+
+  private copy(t: Tracker): Tracker {
+    return structuredClone({ ...t, customFields: { ...(t.customFields ?? {}) } });
   }
 }

@@ -1,0 +1,19 @@
+user_id,user_group,display_name,department
+jsmith,Trading,J. Smith,Trading Technology
+akumar,Trading,A. Kumar,Trading Technology
+mrossi,Trading,M. Rossi,Trading Technology
+tnguyen,Trading,T. Nguyen,Trading Technology
+pgarcia,Trading,P. Garcia,Trading Technology
+lwong,Trading,L. Wong,Trading Technology
+opatel,Risk,O. Patel,Risk Technology
+rbrown,Risk,R. Brown,Risk Technology
+schen,Risk,S. Chen,Risk Technology
+dkim,Risk,D. Kim,Risk Technology
+lchen,Finance,L. Chen,Finance Technology
+mgarcia,Finance,M. Garcia,Finance Technology
+fdubois,Finance,F. Dubois,Finance Technology
+ehall,Finance,E. Hall,Finance Technology
+bmorris,Operations,B. Morris,Operations Technology
+kito,Operations,K. Ito,Operations Technology
+nlee,Analytics,N. Lee,Analytics Technology
+vsingh,Analytics,V. Singh,Analytics Technology

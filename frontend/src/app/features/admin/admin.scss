@@ -65,3 +65,15 @@
   border-radius: 10px;
   overflow: hidden;
 }
+
+.tone-select {
+  width: 90px;
+}
+
+tr.inactive td {
+  opacity: 0.55;
+}
+
+.nowrap {
+  white-space: nowrap;
+}

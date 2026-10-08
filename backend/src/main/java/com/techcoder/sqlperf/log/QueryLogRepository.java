@@ -16,6 +16,8 @@ public interface QueryLogRepository extends JpaRepository<QueryLog, Long>, JpaSp
 
     Page<QueryLog> findByGroupId(Long groupId, Pageable pageable);
 
+    long countByBatchId(Long batchId);
+
     record GroupStats(long groupSize, long distinctUsers, long durationCount, Double avgDuration,
                       Double minDuration, Double maxDuration, Double totalDuration, long errorCount,
                       LocalDateTime firstSeen, LocalDateTime lastSeen) {
@@ -67,6 +69,13 @@ public interface QueryLogRepository extends JpaRepository<QueryLog, Long>, JpaSp
             from QueryLog l where l.fingerprint is not null
             """)
     List<FingerprintKey> allFingerprintKeys();
+
+    /** Fingerprinted rows that never got their group (e.g. the service stopped in the middle of an import). */
+    @Query("""
+            select distinct new com.techcoder.sqlperf.log.QueryLogRepository$FingerprintKey(l.sqlEngine, l.fingerprint)
+            from QueryLog l where l.fingerprint is not null and l.groupId is null
+            """)
+    List<FingerprintKey> orphanFingerprintKeys();
 
     List<QueryLog> findByRowKeyIn(Collection<String> rowKeys);
 

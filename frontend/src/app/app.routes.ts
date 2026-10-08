@@ -1,11 +1,22 @@
 import { Routes } from '@angular/router';
 
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+  { path: '', pathMatch: 'full', redirectTo: 'home' },
+  { path: 'dashboard', redirectTo: 'home' },
   {
-    path: 'dashboard',
-    title: 'Dashboard · SQL Tuning',
-    loadComponent: () => import('./features/dashboard/dashboard').then((m) => m.Dashboard),
+    path: 'home',
+    title: 'Command center · SQL Tuning',
+    loadComponent: () => import('./features/home/home').then((m) => m.Home),
+  },
+  {
+    path: 'insights',
+    title: 'Insights · SQL Tuning',
+    loadComponent: () => import('./features/insights/insights').then((m) => m.Insights),
+  },
+  {
+    path: 'pipeline',
+    title: 'Pipeline board · SQL Tuning',
+    loadComponent: () => import('./features/pipeline/pipeline').then((m) => m.Pipeline),
   },
   {
     path: 'logs',
@@ -37,5 +48,5 @@ export const routes: Routes = [
     title: 'Administration · SQL Tuning',
     loadComponent: () => import('./features/admin/admin').then((m) => m.Admin),
   },
-  { path: '**', redirectTo: 'dashboard' },
+  { path: '**', redirectTo: 'home' },
 ];

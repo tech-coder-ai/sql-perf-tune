@@ -3,6 +3,18 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   AuditEvent,
+  BoardCard,
+  DailyInsight,
+  Iteration,
+  Journey,
+  Lookup,
+  PipelineInsight,
+  SavingsInsight,
+  SearchHit,
+  ThemePriority,
+  TrendsInsight,
+  UserDirectoryEntry,
+  UsersInsight,
   CustomEntityType,
   CustomField,
   DashboardSummary,
@@ -140,7 +152,79 @@ export class Api {
     return this.http.post<Feedback>(`/api/groups/${groupId}/feedback`, body);
   }
 
+  // ----- tuning lifecycle
+  journey(trackerId: number): Observable<Journey> {
+    return this.http.get<Journey>(`/api/tracker/${trackerId}/journey`);
+  }
+  board(p: Params): Observable<BoardCard[]> {
+    return this.http.get<BoardCard[]>('/api/tracker/board', { params: toParams(p) });
+  }
+  createRequest(body: object): Observable<Tracker> {
+    return this.http.post<Tracker>('/api/tracker/requests', body);
+  }
+  iterations(trackerId: number): Observable<Iteration[]> {
+    return this.http.get<Iteration[]>(`/api/tracker/${trackerId}/iterations`);
+  }
+  addIteration(trackerId: number, body: object): Observable<Iteration> {
+    return this.http.post<Iteration>(`/api/tracker/${trackerId}/iterations`, body);
+  }
+  updateIteration(trackerId: number, id: number, body: object): Observable<Iteration> {
+    return this.http.put<Iteration>(`/api/tracker/${trackerId}/iterations/${id}`, body);
+  }
+  selectIteration(trackerId: number, id: number): Observable<Iteration> {
+    return this.http.post<Iteration>(`/api/tracker/${trackerId}/iterations/${id}/select`, null);
+  }
+  search(q: string): Observable<SearchHit[]> {
+    return this.http.get<SearchHit[]>('/api/search', { params: toParams({ q }) });
+  }
+
+  // ----- insights
+  daily(date: string): Observable<DailyInsight> {
+    return this.http.get<DailyInsight>('/api/insights/daily', { params: toParams({ date }) });
+  }
+  pipelineInsight(p: Params): Observable<PipelineInsight> {
+    return this.http.get<PipelineInsight>('/api/insights/pipeline', { params: toParams(p) });
+  }
+  savings(p: Params): Observable<SavingsInsight> {
+    return this.http.get<SavingsInsight>('/api/insights/savings', { params: toParams(p) });
+  }
+  themePriorities(days: number): Observable<ThemePriority[]> {
+    return this.http.get<ThemePriority[]>('/api/insights/themes', { params: toParams({ days }) });
+  }
+  usersInsight(p: Params): Observable<UsersInsight> {
+    return this.http.get<UsersInsight>('/api/insights/users', { params: toParams(p) });
+  }
+  trends(months: number): Observable<TrendsInsight> {
+    return this.http.get<TrendsInsight>('/api/insights/trends', { params: toParams({ months }) });
+  }
+
   // ----- admin
+  lookups(): Observable<Record<string, Lookup[]>> {
+    return this.http.get<Record<string, Lookup[]>>('/api/lookups');
+  }
+  saveLookup(l: Partial<Lookup>): Observable<Lookup> {
+    return l.id ? this.http.put<Lookup>(`/api/lookups/${l.id}`, l) : this.http.post<Lookup>('/api/lookups', l);
+  }
+  directory(): Observable<UserDirectoryEntry[]> {
+    return this.http.get<UserDirectoryEntry[]>('/api/users');
+  }
+  saveDirectoryEntry(e: Partial<UserDirectoryEntry>): Observable<UserDirectoryEntry> {
+    return this.http.put<UserDirectoryEntry>(`/api/users/${encodeURIComponent(e.userId!)}`, e);
+  }
+  deleteDirectoryEntry(userId: string): Observable<void> {
+    return this.http.delete<void>(`/api/users/${encodeURIComponent(userId)}`);
+  }
+  uploadDirectory(file: File): Observable<{ saved: number }> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return this.http.post<{ saved: number }>('/api/users/upload', form);
+  }
+  batch(id: number): Observable<IngestionBatch> {
+    return this.http.get<IngestionBatch>(`/api/ingestion/batches/${id}`);
+  }
+  cancelBatch(id: number): Observable<IngestionBatch> {
+    return this.http.post<IngestionBatch>(`/api/ingestion/batches/${id}/cancel`, null);
+  }
   dataSources(): Observable<DataSource[]> {
     return this.http.get<DataSource[]>('/api/data-sources');
   }

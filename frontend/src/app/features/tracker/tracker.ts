@@ -26,7 +26,7 @@ import {
 } from '../../shared/grid';
 import { TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
 
-const STATE_KEY = 'tracker.grid';
+const STATE_KEY = 'tracker.grid.v2';
 
 @Component({
   selector: 'app-tracker',
@@ -144,6 +144,14 @@ export class TrackerList {
         return { ...def, width: 180, cellClass: 'ag-sql', tooltip: (p) => p.value };
       case 'ts':
         return { ...def, width: 170, valueFormatter: tsFormatter };
+      case 'days':
+        return {
+          ...def,
+          width: 120,
+          ...numCol,
+          valueFormatter: (p) => (p.value === null || p.value === undefined ? '' : `${p.value} d`),
+          cellClassRules: { 'ag-reloaded': (p) => (p.value ?? 0) > 14 },
+        };
       case 'longtext':
         return { ...def, width: 260, tooltip: (p) => p.value };
       default:

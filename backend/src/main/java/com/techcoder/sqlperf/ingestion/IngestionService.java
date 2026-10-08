@@ -2,6 +2,9 @@ package com.techcoder.sqlperf.ingestion;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -15,6 +18,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -35,6 +40,8 @@ import com.techcoder.sqlperf.log.QueryLogRepository.FingerprintKey;
 import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.InputStreamSource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -70,11 +77,14 @@ public class IngestionService {
     private final EntityManager em;
     private final SptProperties props;
     private final ReentrantLock lock = new ReentrantLock(true);
+    /** batch id -> user who asked to cancel it */
+    private final Map<Long, String> cancelled = new ConcurrentHashMap<>();
+    private final Executor worker;
 
     public IngestionService(IngestionBatchRepository batches, QueryLogRepository logs, LogSightingRepository sightings,
                             SourceFileRepository files, SourceConnectionRepository sources, LogFileParser fileParser,
                             JdbcLogPuller puller, GroupingService grouping, RowKeys rowKeys, TransactionTemplate tx,
-                            EntityManager em, SptProperties props) {
+                            EntityManager em, SptProperties props, @Qualifier("ingestionExecutor") Executor worker) {
         this.batches = batches;
         this.logs = logs;
         this.sightings = sightings;
@@ -87,72 +97,159 @@ public class IngestionService {
         this.tx = tx;
         this.em = em;
         this.props = props;
+        this.worker = worker;
     }
 
-    /** @param source re-readable content (a MultipartFile or a Resource): hashed first, then parsed if new */
+    /**
+     * Synchronous import (tests, scripts).
+     *
+     * @param source re-readable content (a MultipartFile or a Resource): hashed first, then parsed if new
+     */
     public IngestionBatch importFile(String fileName, InputStreamSource source, String sqlEngine) {
+        IngestionBatch batch = queueFile(fileName, sqlEngine);
+        return runFile(batch, source);
+    }
+
+    /**
+     * Background import: the batch is created (RUNNING, "Queued") and returned at once; the file is processed
+     * by the single ingestion worker. Poll {@code GET /api/ingestion/batches/{id}} for progress.
+     */
+    public IngestionBatch submitFile(String fileName, InputStreamSource upload, String sqlEngine) throws IOException {
+        IngestionBatch batch = queueFile(fileName, sqlEngine);
+        Path temp = Files.createTempFile("spt-upload-", ".tmp");
+        try (InputStream in = upload.getInputStream()) {
+            Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+        }
+        worker.execute(() -> {
+            try {
+                runFile(batch, new FileSystemResource(temp));
+            } finally {
+                try {
+                    Files.deleteIfExists(temp);
+                } catch (IOException e) {
+                    log.warn("Could not delete {}", temp, e);
+                }
+            }
+        });
+        return batch;
+    }
+
+    private IngestionBatch queueFile(String fileName, String sqlEngine) {
         String engine = engine(sqlEngine);
         String lower = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
         SourceKind kind = lower.endsWith(".xlsx") || lower.endsWith(".xls") ? SourceKind.EXCEL : SourceKind.CSV;
+        return start(kind, null, fileName, engine);
+    }
+
+    private IngestionBatch runFile(IngestionBatch batch, InputStreamSource source) {
         lock.lock();
         try {
-            FileDigest digest = digest(source);
+            progress(batch, "Checking whether this file was loaded before");
+            FileDigest digest;
+            try {
+                digest = digest(source);
+            } catch (IOException e) {
+                return fail(new Loader(batch), e);
+            }
             Optional<SourceFile> known = files.findByContentHash(digest.hash());
             if (known.isPresent()) {
-                return reloadOfKnownFile(known.get(), kind, fileName, engine, digest);
+                return reloadOfKnownFile(known.get(), batch, digest);
             }
-            IngestionBatch batch = start(kind, null, fileName, engine);
             batch.setContentHash(digest.hash());
             batch.setFileLoadNumber(1);
             Loader loader = new Loader(batch);
+            progress(batch, "Reading rows");
             try (InputStream in = source.getInputStream()) {
-                if (kind == SourceKind.EXCEL) {
+                if (batch.getSourceKind() == SourceKind.EXCEL) {
                     fileParser.parseExcel(in, loader);
                 } else {
                     fileParser.parseCsv(in, loader);
                 }
                 IngestionBatch done = finish(loader);
-                registerFile(done, fileName, digest);
+                registerFile(done, batch.getSourceName(), digest);
                 return done;
             } catch (IOException | RuntimeException e) {
-                log.warn("Import of {} failed", fileName, e);
+                if (!(e instanceof CancelledException)) {
+                    log.warn("Import of {} failed", batch.getSourceName(), e);
+                }
                 return fail(loader, e);
             }
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Cannot read " + fileName + ": " + e.getMessage(), e);
         } finally {
+            cancelled.remove(batch.getId());
             lock.unlock();
         }
     }
 
+    /** Synchronous pull (tests, scheduled jobs). */
     public IngestionBatch pull(Long sourceId) {
+        SourceConnection src = source(sourceId);
+        return runPull(start(SourceKind.JDBC, src.getId(), src.getName(), engine(src.getSqlEngine())), src);
+    }
+
+    /** Background pull, like {@link #submitFile}. */
+    public IngestionBatch submitPull(Long sourceId) {
+        SourceConnection src = source(sourceId);
+        IngestionBatch batch = start(SourceKind.JDBC, src.getId(), src.getName(), engine(src.getSqlEngine()));
+        worker.execute(() -> runPull(batch, src));
+        return batch;
+    }
+
+    private SourceConnection source(Long sourceId) {
         SourceConnection src = sources.findById(sourceId).orElseThrow(() -> new NotFoundException("Data source", sourceId));
         if (!src.isActive()) {
             throw new IllegalArgumentException("Data source " + src.getName() + " is inactive");
         }
+        return src;
+    }
+
+    private IngestionBatch runPull(IngestionBatch batch, SourceConnection src) {
         lock.lock();
         try {
-            IngestionBatch batch = start(SourceKind.JDBC, src.getId(), src.getName(), engine(src.getSqlEngine()));
             Loader loader = new Loader(batch);
+            progress(batch, "Querying " + src.getName());
             try {
                 LocalDateTime watermark = puller.pull(src, loader);
                 IngestionBatch done = finish(loader);
-                tx.executeWithoutResult(s -> sources.findById(sourceId).ifPresent(f -> f.setLastWatermark(watermark)));
+                tx.executeWithoutResult(s -> sources.findById(src.getId()).ifPresent(f -> f.setLastWatermark(watermark)));
                 return done;
             } catch (Exception e) {
-                log.warn("Pull from data source {} failed", src.getName(), e);
+                if (!(e instanceof CancelledException)) {
+                    log.warn("Pull from data source {} failed", src.getName(), e);
+                }
                 return fail(loader, e);
             }
         } finally {
+            cancelled.remove(batch.getId());
             lock.unlock();
         }
     }
 
+    /** Asks a running import to stop after the current row; rows loaded so far are kept and grouped. */
+    public IngestionBatch cancel(Long batchId) {
+        IngestionBatch b = batches.findById(batchId).orElseThrow(() -> new NotFoundException("Import", batchId));
+        if (b.getStatus() != Status.RUNNING) {
+            throw new IllegalArgumentException("Import #" + batchId + " is not running");
+        }
+        cancelled.put(batchId, CurrentUser.name());
+        return b;
+    }
+
+    /** Thrown inside the parser loop to stop a cancelled import. */
+    static final class CancelledException extends RuntimeException {
+        CancelledException(String by) {
+            super("Cancelled by " + by);
+        }
+    }
+
+    private void progress(IngestionBatch batch, String message) {
+        batch.setMessage(message);
+        tx.executeWithoutResult(s -> batches.save(batch));
+    }
+
     // ------------------------------------------------------------------ identical file re-load
 
-    private IngestionBatch reloadOfKnownFile(SourceFile file, SourceKind kind, String fileName, String engine,
-                                             FileDigest digest) {
-        IngestionBatch batch = start(kind, null, fileName, engine);
+    private IngestionBatch reloadOfKnownFile(SourceFile file, IngestionBatch batch, FileDigest digest) {
+        String fileName = batch.getSourceName();
         return tx.execute(s -> {
             LocalDateTime now = LocalDateTime.now();
             int rows = sightings.copyFromBatch(file.getProcessedBatchId(), batch.getId(), now);
@@ -238,6 +335,9 @@ public class IngestionService {
 
     private IngestionBatch finish(Loader loader) {
         loader.flush();
+        // rows left ungrouped by an earlier interrupted import are grouped now as well
+        loader.keys.addAll(logs.orphanFingerprintKeys());
+        progress(loader.batch, "Grouping " + loader.keys.size() + " query patterns");
         int groupsAffected = grouping.recompute(loader.keys);
         IngestionBatch b = loader.batch;
         b.setGroupsAffected(groupsAffected);
@@ -251,13 +351,19 @@ public class IngestionService {
         // keep whatever was loaded consistent with its groups
         try {
             loader.flush();
+            loader.keys.addAll(logs.orphanFingerprintKeys());
             loader.batch.setGroupsAffected(grouping.recompute(loader.keys));
         } catch (RuntimeException ignored) {
             // original error is more relevant
         }
         IngestionBatch b = loader.batch;
         b.setStatus(Status.FAILED);
-        b.setMessage(Texts.truncate(join(loader.errors, e.getMessage()), 4000));
+        String head = e instanceof CancelledException
+                ? e.getMessage() + " after " + b.getRowsRead() + " rows. The " + b.getRowsLoaded()
+                        + " new rows loaded so far were kept and grouped; upload the file again to load the rest "
+                        + "(rows already loaded are skipped)."
+                : e.getMessage();
+        b.setMessage(Texts.truncate(join(loader.errors, head), 4000));
         b.setCompletedAt(LocalDateTime.now());
         return tx.execute(s -> batches.save(b));
     }
@@ -294,6 +400,10 @@ public class IngestionService {
 
         @Override
         public void accept(RawLogRecord record) {
+            String by = cancelled.get(batch.getId());
+            if (by != null) {
+                throw new CancelledException(by);
+            }
             batch.setRowsRead(batch.getRowsRead() + 1);
             QueryLog q;
             try {
@@ -364,6 +474,7 @@ public class IngestionService {
             });
             batch.setRowsLoaded(batch.getRowsLoaded() + inserted.size());
             batch.setRowsDuplicate(batch.getRowsDuplicate() + chunk.size() - inserted.size());
+            progress(batch, "Read " + batch.getRowsRead() + " rows");
             for (QueryLog q : inserted) {
                 if (q.getFingerprint() != null) {
                     keys.add(new FingerprintKey(q.getSqlEngine(), q.getFingerprint()));

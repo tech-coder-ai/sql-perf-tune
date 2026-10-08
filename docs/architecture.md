@@ -14,11 +14,11 @@ The numbers match the *Impala SQL – Performance & Tuning – Tactical Workflow
 | 6 | Parse profile | `ImpalaProfileParser` → `PROFILE_SUMMARY` JSON, execution / teardown seconds |
 | 7 | Optimization prompts | `SPT_PROMPT_TEMPLATE` (versioned), Administration → Prompt templates |
 | 8 | Optimization agent (Get DDL, bad SQL, DDL, explain, exec summary) | `SPT_TABLE_DDL`, `PromptRenderer`, `OptimizationAgent` port |
-| 9 | Agent output (change narrative, optimized SQL) | `SPT_OPTIMIZATION_RUN`; copied to the tracker |
-| 10 | Run new SQL (post-run diagnostics) | Diagnostics with phase `OPTIMIZED` → post-run tracker metrics |
+| 9 | Agent output (change narrative, optimized SQL) | `SPT_OPTIMIZATION_RUN` → a new `SPT_TUNING_ITERATION` (manual iterations too) |
+| 10 | Run new SQL (post-run diagnostics) | Diagnostics with phase `OPTIMIZED` for an iteration → its test results; the best iteration is selected and copied to the tracker |
 | 11 | Load output | Before/after rows in `SPT_SQL_DIAGNOSTIC` + tracker metrics |
-| 12 | Olympus Tuning Diagnostic Tool (inventory, adoption) | Tuning Tracker screen + `SPT_FEEDBACK` |
-| Note | Failed optimization feedback | `SPT_FEEDBACK` with `REJECTED` (reason required) |
+| 12 | Olympus Tuning Diagnostic Tool (inventory, adoption) | Tuning Tracker, Pipeline board, Insights + `SPT_FEEDBACK` (adopt / reject an iteration) |
+| Note | Failed optimization feedback | `SPT_FEEDBACK` with `REJECTED` + `REJECTION_REASON`; the iteration is rejected and the item goes back to Tuning |
 
 ### LLM integration
 
@@ -45,8 +45,17 @@ erDiagram
     SPT_PROMPT_TEMPLATE ||--o{ SPT_OPTIMIZATION_RUN : "rendered from"
     SPT_OPTIMIZATION_RUN ||--o{ SPT_SQL_DIAGNOSTIC : "validated by"
     SPT_QUERY_GROUP ||--o{ SPT_FEEDBACK : "adoption"
+    SPT_TUNING_TRACKER ||--o{ SPT_TUNING_ITERATION : "tuning attempts"
+    SPT_OPTIMIZATION_RUN ||--o| SPT_TUNING_ITERATION : "agent answer"
+    SPT_TUNING_ITERATION ||--o{ SPT_SQL_DIAGNOSTIC : "tested by"
+    SPT_TUNING_ITERATION ||--o{ SPT_FEEDBACK : "adopted / rejected"
     SPT_CUSTOM_FIELD ||--o{ SPT_CUSTOM_FIELD_VALUE : "values"
+    SPT_LOOKUP }o--o{ SPT_TUNING_TRACKER : "dropdown values"
+    SPT_USER_DIRECTORY ||--o{ SPT_QUERY_LOG : "user group"
 ```
+
+`SPT_LOOKUP` (dropdown values per category) and `SPT_USER_DIRECTORY` (user id → user group) are matched by
+value, not by foreign key, so values can be renamed or retired without touching history.
 
 Drill path: **Tracker (T-n) → Group (#n) → Log rows**, and back up from any log row via `GROUP_ID`
 and from a group via its tracker. Group metrics are *not* copied to the tracker; the tracker screen and
@@ -79,8 +88,38 @@ Naming decisions:
 | OG / post run tear down percentage | `*_TEARDOWN_PCT` | derived as teardown ÷ run duration when left empty |
 | install / execute / Validation | `INSTALL_STATUS` / `EXECUTE_STATUS` / `VALIDATION_STATUS` | avoids reserved-looking names |
 
-Added for enterprise use: `WORKFLOW_STATUS`, `PRIORITY`, audit columns, `VERSION` (optimistic locking:
-two people editing the same row get a 409 instead of silently overwriting each other).
+Added for enterprise use: `WORKFLOW_STATUS` (the stage), `PRIORITY`, audit columns, `VERSION` (optimistic
+locking: two people editing the same row get a 409 instead of silently overwriting each other).
+
+Added for tuning analytics (V4): `REQUEST_SOURCE` (log detected / proactive UAT / user request),
+`REQUESTED_BY`, `ENVIRONMENT`, `STAGE_CHANGED_AT`, `ADOPTED_AT`, `CLOSED_AT`, `SELECTED_ITERATION_ID`, and
+OG / post-run `CPU_SECONDS`, `ROWS_SCANNED`, `TABLES_SCANNED`, `BYTES_SCANNED`, `PEAK_MEMORY_MB`.
+
+## Tuning lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> NEW: group tracked / request
+    NEW --> DIAGNOSTICS_CAPTURED: original profile
+    DIAGNOSTICS_CAPTURED --> OPTIMIZATION_REQUESTED: agent run
+    OPTIMIZATION_REQUESTED --> OPTIMIZED: iteration added
+    OPTIMIZED --> POST_RUN_VALIDATED: iteration tested
+    POST_RUN_VALIDATED --> SME_VALIDATION: best iteration selected
+    SME_VALIDATION --> ADOPTED: users adopt
+    SME_VALIDATION --> OPTIMIZATION_REQUESTED: iteration rejected (reason)
+    SME_VALIDATION --> REJECTED: item rejected
+    ADOPTED --> [*]
+```
+
+Labels in the UI: Triage, Diagnosed, Tuning, Candidate ready, Tested, Awaiting adoption, Adopted (plus
+Rejected, On hold). Every change is an `SPT_AUDIT_EVENT`, from which the journey and turnaround (Q9) are
+derived. Details: [developer-guide.md §8](developer-guide.md#8-tuning-lifecycle-stages-and-iterations).
+
+## Insights
+
+`InsightsService` computes the 15 programme questions on the fly from logs, groups, tracker, iterations,
+feedback and audit events (no reporting tables). Definitions and endpoints:
+[developer-guide.md §9](developer-guide.md#9-insights-insights).
 
 ## Loads and de-duplication
 

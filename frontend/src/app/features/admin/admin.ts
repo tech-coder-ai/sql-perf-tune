@@ -12,7 +12,17 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridOptions } from 'ag-grid-community';
 import { Api } from '../../core/api';
-import { CustomEntityType, CustomField, DataSource, IngestionBatch, PromptTemplate, SourceFile } from '../../core/models';
+import { LookupStore } from '../../core/lookups';
+import {
+  CustomEntityType,
+  CustomField,
+  DataSource,
+  IngestionBatch,
+  Lookup,
+  PromptTemplate,
+  SourceFile,
+  UserDirectoryEntry,
+} from '../../core/models';
 import { TimestampPipe } from '../../shared/format';
 import { LinkCell, StatusCell, baseGridOptions, numCol, tsFormatter } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
@@ -54,6 +64,93 @@ export class Admin {
   fieldEntity: CustomEntityType = 'TRACKER';
   field: Partial<CustomField> = this.newField();
   prompt = { name: 'impala-default', sqlEngine: 'IMPALA', templateText: '', notes: '' };
+
+  // ---- dropdown values
+  protected readonly lookups = inject(LookupStore);
+  protected lookupCategory = 'THEME';
+  protected newLookup = { value: '', tone: 'info' };
+  protected readonly tones = ['ok', 'warn', 'bad', 'info', 'muted'];
+  protected readonly categoryLabels: Record<string, string> = {
+    THEME: 'Theme',
+    DEV_TEAM_STATUS: 'Dev team status',
+    OPTIMIZED_SQL_STATUS: 'Optimized SQL',
+    CLOUDERA_POST_RUN_VALIDATION: 'Cloudera post-run validation',
+    SME_VALIDATION: 'SME validation',
+    INSTALL_STATUS: 'Install',
+    EXECUTE_STATUS: 'Execute',
+    VALIDATION_STATUS: 'Validation',
+    ENVIRONMENT: 'Environment',
+    REJECTION_REASON: 'Rejection reason',
+  };
+
+  addLookup(): void {
+    const entries = this.lookups.entries(this.lookupCategory);
+    const sortOrder = (entries.length ? Math.max(...entries.map((e) => e.sortOrder)) : 0) + 10;
+    this.api
+      .saveLookup({ category: this.lookupCategory, value: this.newLookup.value, tone: this.newLookup.tone as Lookup['tone'], sortOrder })
+      .subscribe(() => {
+        this.newLookup = { value: '', tone: 'info' };
+        this.lookups.reload().subscribe();
+      });
+  }
+
+  updateLookup(l: Lookup, patch: Partial<Lookup>): void {
+    this.api.saveLookup({ ...l, ...patch }).subscribe(() => this.lookups.reload().subscribe());
+  }
+
+  moveLookup(l: Lookup, dir: -1 | 1): void {
+    const list = this.lookups.entries(this.lookupCategory);
+    const idx = list.findIndex((x) => x.id === l.id);
+    const other = list[idx + dir];
+    if (!other) return;
+    this.api.saveLookup({ ...l, sortOrder: other.sortOrder }).subscribe(() =>
+      this.api.saveLookup({ ...other, sortOrder: l.sortOrder }).subscribe(() => this.lookups.reload().subscribe()),
+    );
+  }
+
+  // ---- users & groups
+  protected readonly directory = signal<UserDirectoryEntry[]>([]);
+  protected userEdit: Partial<UserDirectoryEntry> = {};
+  readonly userGrid: GridOptions<UserDirectoryEntry> = { ...baseGridOptions, pagination: true, paginationPageSize: 20 };
+  readonly userCols: ColDef<UserDirectoryEntry>[] = [
+    { field: 'userId', headerName: 'User id', width: 160, sortable: true },
+    { field: 'displayName', headerName: 'Name', width: 180, sortable: true },
+    { field: 'userGroup', headerName: 'User group', width: 180, sortable: true },
+    { field: 'department', headerName: 'Department', flex: 1, sortable: true },
+    { field: 'updatedAt', headerName: 'Updated', width: 170, valueFormatter: tsFormatter },
+  ];
+
+  loadDirectory(): void {
+    this.api.directory().subscribe((d) => this.directory.set(d));
+  }
+
+  editUser(e: UserDirectoryEntry | undefined): void {
+    if (e) this.userEdit = { ...e };
+  }
+
+  saveUser(): void {
+    this.api.saveDirectoryEntry(this.userEdit).subscribe(() => {
+      this.userEdit = {};
+      this.loadDirectory();
+    });
+  }
+
+  deleteUser(): void {
+    if (!this.userEdit.userId) return;
+    this.api.deleteDirectoryEntry(this.userEdit.userId).subscribe(() => {
+      this.userEdit = {};
+      this.loadDirectory();
+    });
+  }
+
+  uploadUsers(e: Event): void {
+    const f = (e.target as HTMLInputElement).files?.[0];
+    if (!f) return;
+    this.api.uploadDirectory(f).subscribe((r) => {
+      this.snack.open(`${r.saved} users saved`, undefined, { duration: 3000 });
+      this.loadDirectory();
+    });
+  }
 
   readonly files = signal<SourceFile[]>([]);
   readonly fileGrid: GridOptions<SourceFile> = { ...baseGridOptions, rowClass: undefined, pagination: true, paginationPageSize: 20 };
@@ -146,6 +243,7 @@ export class Admin {
     });
     this.api.batches().subscribe((b) => this.batches.set(b));
     this.api.loadedFiles().subscribe((f) => this.files.set(f));
+    this.loadDirectory();
     this.loadFields();
   }
 
