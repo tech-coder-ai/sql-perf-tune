@@ -14,6 +14,7 @@ Enterprise workbench for finding, grouping, tracking and optimizing long running
 | [User manual](docs/user-manual.md) | Engineers, SMEs and business users using the screens |
 | [Developer guide](docs/developer-guide.md) | Setup, code layout, migrations, ingestion design, AG Grid, deployment |
 | [Architecture](docs/architecture.md) | Workflow mapping, data model, fingerprint rules |
+| [Rebuild prompt](docs/REBUILD_PROMPT.md) | Full specification to recreate the system with another LLM / team |
 
 ## Screens
 
