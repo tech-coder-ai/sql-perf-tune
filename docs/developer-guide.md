@@ -73,6 +73,7 @@ frontend/
   src/app/shared/      grid.ts (AG Grid setup), charts.ts, journey stepper, request dialog, SQL viewer, chips
   src/app/features/    home (command center), insights, pipeline, logs, groups, tracker, admin
 db/oracle/00_create_schema.sql    one-off DBA script (users / grants)
+db/oracle/01_drop_and_create_schema.sql   drop + re-create all tables / views + initial values
 samples/                          sample input logs and user directory
 docs/                             architecture, developer guide, user manual
 ```
@@ -92,6 +93,10 @@ docs/                             architecture, developer guide, user manual
   `@JdbcTypeCode(SqlTypes.LONG32VARCHAR)` (not `@Lob`) so they bind as strings and can be searched.
 - Custom HQL functions (`SptFunctionContributor`, dialect-aware): `spt_lower(...)` for case-insensitive search
   on Oracle CLOBs and SQLite, and `spt_date(ts)` for grouping by calendar day (§9).
+- `db/oracle/01_drop_and_create_schema.sql` drops and re-creates every table and view and loads the initial
+  values (prompt template, dropdown values), equivalent to V1-V4 in one script for DBAs. It also drops the
+  Flyway history; start the service once with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` and
+  `SPRING_FLYWAY_BASELINE_VERSION=4` afterwards. Keep it in step when adding a migration.
 - Oracle scripts were written for 19c+ (identity columns). Run them against your target version in CI
   before the first shared deployment.
 
