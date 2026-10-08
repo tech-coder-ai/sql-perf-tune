@@ -27,6 +27,7 @@ import {
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { minutesText, num, secondsText } from '../../shared/dates';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
+import { deltaText } from '../../shared/grid';
 import { JourneyView } from '../../shared/journey';
 import { SqlBlock } from '../../shared/sql-block';
 import { StatusChip } from '../../shared/status-chip';
@@ -94,6 +95,16 @@ export class TrackerDetail implements OnInit {
   protected readonly stage = STAGE;
   protected readonly dropdowns = DROPDOWNS;
   protected readonly num = num;
+  protected readonly deltaText = deltaText;
+
+  /** iteration improvement (positive = better) as a change from the original (negative = less) */
+  protected negate(v: number | null): number | null {
+    return v === null ? null : -v;
+  }
+
+  protected deltaOf(og: number | null, post: number | null): number | null {
+    return og === null || post === null || og === 0 ? null : Math.round(((post - og) / og) * 1000) / 10;
+  }
 
   protected readonly saved = signal<Tracker | null>(null);
   protected readonly journey = signal<Journey | null>(null);
@@ -284,8 +295,8 @@ export class TrackerDetail implements OnInit {
 
   change(r: MetricRow): { text: string; good: boolean | null } {
     if (r.og === null || r.post === null || r.og === 0) return { text: '—', good: null };
-    const pct = Math.round(((r.og - r.post) / r.og) * 1000) / 10;
-    return { text: `${pct > 0 ? '−' : '+'}${Math.abs(pct)}%`, good: r.lower ? pct > 0 : pct < 0 };
+    const d = this.deltaOf(r.og, r.post)!;
+    return { text: deltaText(d), good: d === 0 ? null : r.lower ? d < 0 : d > 0 };
   }
 
   fieldLabel(name: string | null): string {

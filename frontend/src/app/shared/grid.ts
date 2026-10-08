@@ -38,6 +38,7 @@ import {
   StatusBarModule,
 } from 'ag-grid-enterprise';
 import { Observable } from 'rxjs';
+import { LookupStore } from '../core/lookups';
 import { Page } from '../core/models';
 import { formatMinutes } from './format';
 import { StatusChip } from './status-chip';
@@ -165,6 +166,26 @@ export const tsFormatter = (p: ValueFormatterParams) => (p.value ? String(p.valu
 export const secondsFormatter = (p: ValueFormatterParams) => (p.value === null || p.value === undefined ? '' : `${p.value} s`);
 export const pctFormatter = (p: ValueFormatterParams) => (p.value === null || p.value === undefined ? '' : `${p.value} %`);
 
+/**
+ * Change from original to post-implementation, e.g. "−45.2%" (or "pts" for percentage points).
+ * Negative means less time / resources, i.e. better.
+ */
+export function deltaText(v: number | null | undefined, unit = '%'): string {
+  if (v === null || v === undefined) return '';
+  const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+  return `${sign}${Math.abs(v).toFixed(1)}${unit === '%' ? '%' : ' ' + unit}`;
+}
+export const deltaFormatter = (p: ValueFormatterParams) => deltaText(p.value);
+export const deltaPtsFormatter = (p: ValueFormatterParams) => deltaText(p.value, 'pts');
+/** Green when the metric went down, red when it went up. */
+export const deltaCellRules = {
+  'ag-good': (p: { value?: number | null }) => (p.value ?? 0) < 0,
+  'ag-bad': (p: { value?: number | null }) => (p.value ?? 0) > 0,
+};
+
+/** Red text on a light red cell for error values; empty cells stay plain. */
+export const errorCellRules = { 'ag-error': (p: { value?: unknown }) => !!p.value && p.value !== 0 };
+
 /** Column presets; spread into a typed ColDef. Typed narrowly so they do not widen `field`. */
 export const numCol: { headerClass: string; cellClass: string } = { headerClass: 'ag-right-aligned-header', cellClass: 'ag-num' };
 export const sqlCol: { cellClass: string; width: number; tooltip: (p: { value?: unknown }) => unknown } = {
@@ -207,19 +228,34 @@ export function pagedDatasource<T>(
 
 // ---------------------------------------------------------------- cell renderers
 
-/** Status / priority pill. */
+export interface StatusCellParams {
+  /** dropdown (lookup) category: the pill shows the value as entered, coloured by the value's tone */
+  category?: string;
+}
+
+/** Status / priority pill; with a lookup category it renders dropdown values (e.g. Dev team status) as pills. */
 @Component({
   selector: 'app-status-cell',
   imports: [StatusChip],
-  template: `<app-status [value]="value" />`,
+  template: `@if (value) {
+      @if (category) {
+        <app-status [text]="value" [tone]="lookups.tone(category, value)" />
+      } @else {
+        <app-status [value]="value" />
+      }
+    }`,
 })
 export class StatusCell implements ICellRendererAngularComp {
+  protected readonly lookups = inject(LookupStore);
   value: string | null = null;
-  agInit(p: ICellRendererParams): void {
+  category?: string;
+  agInit(p: ICellRendererParams & StatusCellParams): void {
     this.value = p.value;
+    this.category = p.category;
   }
-  refresh(p: ICellRendererParams): boolean {
+  refresh(p: ICellRendererParams & StatusCellParams): boolean {
     this.value = p.value;
+    this.category = p.category;
     return true;
   }
 }

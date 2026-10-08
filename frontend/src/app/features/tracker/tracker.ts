@@ -15,6 +15,9 @@ import { downloadBlob, loadPref, savePref } from '../../core/prefs';
 import {
   LinkCell,
   StatusCell,
+  deltaCellRules,
+  deltaFormatter,
+  deltaPtsFormatter,
   serverGridOptions,
   minutesFormatter,
   numCol,
@@ -26,7 +29,7 @@ import {
 } from '../../shared/grid';
 import { TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
 
-const STATE_KEY = 'tracker.grid.v2';
+const STATE_KEY = 'tracker.grid.v3';
 
 @Component({
   selector: 'app-tracker',
@@ -105,6 +108,18 @@ export class TrackerList {
   }
 
   private toColDef(c: TrackerColumn): ColDef<Tracker> {
+    const def = this.baseDef(c);
+    // header tint: original (orange) / post-implementation (green) / change (violet)
+    if (c.phase) {
+      const right = def.headerClass ? ' ' + def.headerClass : '';
+      def.headerClass = 'hdr-' + c.phase + right;
+      def.width = Math.max(def.width ?? 0, c.kind === 'delta' || c.kind === 'deltaPts' ? 175 : 190);
+      def.headerTooltip = { pre: 'Original run', post: 'After tuning (post-implementation)', delta: 'Change from original to post-implementation; negative = less' }[c.phase];
+    }
+    return def;
+  }
+
+  private baseDef(c: TrackerColumn): ColDef<Tracker> {
     const def: ColDef<Tracker> = {
       colId: c.key,
       headerName: c.label,
@@ -123,6 +138,12 @@ export class TrackerList {
         };
       case 'status':
         return { ...def, width: 170, cellRenderer: StatusCell };
+      case 'lookup':
+        return { ...def, width: 170, cellRenderer: StatusCell, cellRendererParams: { category: c.category } };
+      case 'delta':
+        return { ...def, width: 150, valueFormatter: deltaFormatter, ...numCol, cellClassRules: deltaCellRules };
+      case 'deltaPts':
+        return { ...def, width: 170, valueFormatter: deltaPtsFormatter, ...numCol, cellClassRules: deltaCellRules };
       case 'minutes':
         return { ...def, width: 130, valueFormatter: minutesFormatter, ...numCol };
       case 'seconds':

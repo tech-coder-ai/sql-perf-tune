@@ -51,6 +51,14 @@ public record TrackerDto(
         TuningTracker.WorkflowStatus workflowStatus,
         TuningTracker.Priority priority,
         Double improvementPct,
+        Double runDurationDeltaPct,
+        Double executionTimeDeltaPct,
+        Double teardownTimeDeltaPct,
+        Double teardownPctDeltaPts,
+        Double cpuDeltaPct,
+        Double rowsScannedDeltaPct,
+        Double tablesScannedDeltaPct,
+        Double peakMemoryDeltaPct,
         String sqlEngine,
         Double ogCpuSeconds,
         Double postRunCpuSeconds,
@@ -94,7 +102,16 @@ public record TrackerDto(
                 t.getPostRunTeardownTimeSeconds(), t.getOgTeardownPct(), t.getPostRunTeardownPct(), t.getTheme(),
                 t.getSmeValidation(), t.getInstallStatus(), t.getExecuteStatus(), t.getValidationStatus(),
                 t.getChanges(), t.getProblem(), t.getRecommendations(), t.getWorkflowStatus(), t.getPriority(),
-                improvement(t.getOgRunDurationMinutes(), t.getPostRunDurationMinutes()), g.getSqlEngine(),
+                improvement(t.getOgRunDurationMinutes(), t.getPostRunDurationMinutes()),
+                delta(t.getOgRunDurationMinutes(), t.getPostRunDurationMinutes()),
+                delta(t.getOgExecutionTimeSeconds(), t.getPostRunExecutionTimeSeconds()),
+                delta(t.getOgTeardownTimeSeconds(), t.getPostRunTeardownTimeSeconds()),
+                points(t.getOgTeardownPct(), t.getPostRunTeardownPct()),
+                delta(t.getOgCpuSeconds(), t.getPostRunCpuSeconds()),
+                delta(num(t.getOgRowsScanned()), num(t.getPostRunRowsScanned())),
+                delta(num(t.getOgTablesScanned()), num(t.getPostRunTablesScanned())),
+                delta(t.getOgPeakMemoryMb(), t.getPostRunPeakMemoryMb()),
+                g.getSqlEngine(),
                 t.getOgCpuSeconds(), t.getPostRunCpuSeconds(), t.getOgRowsScanned(), t.getPostRunRowsScanned(),
                 t.getOgTablesScanned(), t.getPostRunTablesScanned(), t.getOgBytesScanned(), t.getPostRunBytesScanned(),
                 t.getOgPeakMemoryMb(), t.getPostRunPeakMemoryMb(), t.getRequestSource(), t.getRequestedBy(),
@@ -110,6 +127,23 @@ public record TrackerDto(
             return null;
         }
         return Math.round((before - after) / before * 1000d) / 10d;
+    }
+
+    /** Change from original to post-implementation in percent (negative = less time / resources). */
+    public static Double delta(Double og, Double post) {
+        if (og == null || post == null || og == 0) {
+            return null;
+        }
+        return Math.round((post - og) / og * 1000d) / 10d;
+    }
+
+    /** Difference of two percentages in percentage points (post - original). */
+    private static Double points(Double og, Double post) {
+        return og == null || post == null ? null : Math.round((post - og) * 10d) / 10d;
+    }
+
+    private static Double num(Number n) {
+        return n == null ? null : n.doubleValue();
     }
 
     private static Integer days(LocalDateTime from, LocalDateTime to) {

@@ -254,6 +254,16 @@ Group metrics (size, users, durations, sample query) are always current; the res
 The grid supports drill down (open an item, then its group and log rows) and up (from a log row to its group
 and item).
 
+**Before / after columns.** Every tuned metric has three adjacent columns with coloured headers:
+**Original** (orange), **Post-implementation** (green) and **Δ %** (violet). Δ % is the change from the original
+to the post-implementation value: negative (green) means faster / less, positive (red) means slower / more.
+Run duration, execution and CPU are shown by default; teardown, rows / tables scanned and peak memory are in the
+**Columns** panel. The Excel export uses the same header colours and includes the Δ columns.
+
+Statuses and dropdown values (stage, priority, source, dev team status, optimized SQL, validations, theme, …)
+are shown as coloured pills. On Query logs and Query groups, error codes, categories, messages and error counts
+are shown in red.
+
 ### 8.1 The item page
 
 - **Header:** id, stage, priority, group, theme, runs and users, plus the actions that fit the stage, e.g.

@@ -24,7 +24,7 @@ import {
   UserDirectoryEntry,
 } from '../../core/models';
 import { TimestampPipe } from '../../shared/format';
-import { LinkCell, StatusCell, baseGridOptions, numCol, tsFormatter } from '../../shared/grid';
+import { LinkCell, StatusCell, baseGridOptions, errorCellRules, numCol, tsFormatter } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 
 const SAMPLE_LOG_QUERY = `SELECT seq_id, executed_query, user_query, error_code, error_category, error_message,
@@ -222,7 +222,7 @@ export class Admin {
       valueFormatter: (p) => (p.value ? 'import #' + p.value : ''),
       cellClass: 'ag-reloaded',
     },
-    { field: 'rowsRejected', headerName: 'Rejected', width: 105, sortable: true, ...numCol },
+    { field: 'rowsRejected', headerName: 'Rejected', width: 105, sortable: true, ...numCol, cellClassRules: errorCellRules },
     { field: 'groupsAffected', headerName: 'Groups', width: 100, sortable: true, ...numCol },
     { field: 'startedAt', headerName: 'Started', width: 170, sortable: true, valueFormatter: tsFormatter },
     { field: 'completedAt', headerName: 'Completed', width: 170, valueFormatter: tsFormatter },

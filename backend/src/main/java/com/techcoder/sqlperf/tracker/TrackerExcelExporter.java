@@ -12,7 +12,9 @@ import com.techcoder.sqlperf.customfield.CustomField;
 import com.techcoder.sqlperf.customfield.CustomFieldService;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
@@ -48,13 +50,20 @@ public class TrackerExcelExporter {
             Font bold = wb.createFont();
             bold.setBold(true);
             header.setFont(bold);
+            // original / post-implementation / change columns get distinct header colours (as on screen)
+            CellStyle pre = filled(wb, header, IndexedColors.LIGHT_ORANGE);
+            CellStyle post = filled(wb, header, IndexedColors.LIGHT_GREEN);
+            CellStyle delta = filled(wb, header, IndexedColors.LAVENDER);
 
             Row h = sheet.createRow(0);
             int c = 0;
             for (RecordComponent rc : cols) {
                 Cell cell = h.createCell(c++);
-                cell.setCellValue(snake(rc.getName()));
-                cell.setCellStyle(header);
+                String name = rc.getName();
+                cell.setCellValue(snake(name));
+                cell.setCellStyle(name.startsWith("og") ? pre
+                        : name.startsWith("postRun") ? post
+                        : name.contains("Delta") || name.equals("improvementPct") ? delta : header);
             }
             for (CustomField f : custom) {
                 Cell cell = h.createCell(c++);
@@ -76,6 +85,14 @@ public class TrackerExcelExporter {
             }
             wb.write(out);
         }
+    }
+
+    private static CellStyle filled(SXSSFWorkbook wb, CellStyle base, IndexedColors color) {
+        CellStyle s = wb.createCellStyle();
+        s.cloneStyleFrom(base);
+        s.setFillForegroundColor(color.getIndex());
+        s.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return s;
     }
 
     private static void set(Cell cell, Object v) {

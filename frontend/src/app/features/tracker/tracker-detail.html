@@ -60,7 +60,7 @@
               }
             </div>
             <table class="simple">
-              <tr><th>Metric</th><th class="num">Original</th><th class="num">Tuned</th><th class="num">Change</th></tr>
+              <tr><th>Metric</th><th class="num hdr-pre">Original</th><th class="num hdr-post">Post-implementation</th><th class="num hdr-delta">Δ %</th></tr>
               @for (r of metrics(); track r.label) {
                 @let c = change(r);
                 <tr>
@@ -134,12 +134,13 @@
                 <th></th>
                 <th>#</th>
                 <th>Status</th>
-                <th class="num">Run time</th>
-                <th class="num">Δ run</th>
-                <th class="num">CPU</th>
-                <th class="num">Δ CPU</th>
-                <th class="num">Rows scanned</th>
-                <th class="num">Tables</th>
+                <th class="num hdr-post">Run time</th>
+                <th class="num hdr-delta">Δ run %</th>
+                <th class="num hdr-post">CPU</th>
+                <th class="num hdr-delta">Δ CPU %</th>
+                <th class="num hdr-post">Rows scanned</th>
+                <th class="num hdr-delta">Δ rows %</th>
+                <th class="num hdr-post">Tables</th>
                 <th>Results match</th>
                 <th>Tested</th>
                 <th></th>
@@ -153,8 +154,9 @@
                 <td class="num">{{ t.ogCpuSeconds ?? '—' }}{{ t.ogCpuSeconds !== null ? ' s' : '' }}</td>
                 <td></td>
                 <td class="num">{{ num(t.ogRowsScanned) }}</td>
+                <td></td>
                 <td class="num">{{ t.ogTablesScanned ?? '—' }}</td>
-                <td colspan="3" class="muted">baseline from the original diagnostics</td>
+                <td colspan="3" class="muted">baseline: original run</td>
               </tr>
               @for (i of iterations(); track i.id) {
                 <tr [class.best-row]="i.best" [class.sel-row]="i.selected" [class.editing]="editing()?.id === i.id">
@@ -169,12 +171,14 @@
                   </td>
                   <td><app-status [value]="i.status" /></td>
                   <td class="num">{{ i.runDurationMinutes | minutes }}</td>
-                  <td class="num" [class.good]="(i.durationImprovementPct ?? 0) > 0" [class.bad]="(i.durationImprovementPct ?? 0) < 0">
-                    {{ i.durationImprovementPct === null ? '—' : i.durationImprovementPct + '%' }}
-                  </td>
+                  @let dRun = negate(i.durationImprovementPct);
+                  @let dCpu = negate(i.cpuImprovementPct);
+                  @let dRows = deltaOf(t.ogRowsScanned, i.rowsScanned);
+                  <td class="num" [class.good]="(dRun ?? 0) < 0" [class.bad]="(dRun ?? 0) > 0">{{ deltaText(dRun) || '—' }}</td>
                   <td class="num">{{ i.cpuSeconds ?? '—' }}{{ i.cpuSeconds !== null ? ' s' : '' }}</td>
-                  <td class="num" [class.good]="(i.cpuImprovementPct ?? 0) > 0">{{ i.cpuImprovementPct === null ? '—' : i.cpuImprovementPct + '%' }}</td>
+                  <td class="num" [class.good]="(dCpu ?? 0) < 0" [class.bad]="(dCpu ?? 0) > 0">{{ deltaText(dCpu) || '—' }}</td>
                   <td class="num">{{ num(i.rowsScanned) }}</td>
+                  <td class="num" [class.good]="(dRows ?? 0) < 0" [class.bad]="(dRows ?? 0) > 0">{{ deltaText(dRows) || '—' }}</td>
                   <td class="num">
                     {{ i.tablesScanned ?? '—' }}
                     @if ((i.tableScansAvoided ?? 0) > 0) {

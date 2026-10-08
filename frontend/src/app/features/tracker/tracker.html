@@ -47,6 +47,13 @@
       <button mat-button type="button" (click)="reset()">Reset</button>
     </form>
 
+    <div class="phase-legend legend-row" aria-label="Column colours">
+      <span class="key pre">Original</span>
+      <span class="key post">Post-implementation</span>
+      <span class="key delta">Δ % change</span>
+      <span>Δ is post vs original: <span class="good">negative = faster / less</span>, <span class="bad">positive = slower / more</span>. More metrics in the Columns panel.</span>
+    </div>
+
     <ag-grid-angular
       class="grid"
       [gridOptions]="gridOptions"

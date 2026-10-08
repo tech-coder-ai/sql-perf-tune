@@ -12,7 +12,7 @@ import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryGroup } from '../../core/models';
-import { LinkCell, minutesFormatter, numCol, pagedDatasource, serverGridOptions, sqlCol } from '../../shared/grid';
+import { LinkCell, errorCellRules, minutesFormatter, numCol, pagedDatasource, serverGridOptions, sqlCol } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupDetailRow } from './group-detail-row';
 
@@ -133,7 +133,7 @@ export class Groups {
       ...numCol,
       cellClass: 'ag-num ag-strong',
     },
-    { colId: 'errorCount', field: 'errorCount', headerName: 'Errors', width: 100, sortable: true, ...numCol },
+    { colId: 'errorCount', field: 'errorCount', headerName: 'Errors', width: 100, sortable: true, ...numCol, cellClassRules: errorCellRules },
     { colId: 'sampleQuerySeqId', field: 'sampleQuery', headerName: 'Sample query', ...sqlCol, minWidth: 320, flex: 1 },
     { colId: 'rowIndices', field: 'rowIndices', headerName: 'Row indices', width: 160, cellClass: 'ag-sql', tooltip: (p) => p.data?.rowIndices },
     {

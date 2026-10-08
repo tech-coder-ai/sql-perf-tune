@@ -4,7 +4,7 @@ import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryLog } from '../../core/models';
-import { serverGridOptions, minutesFormatter, numCol, pagedDatasource, sqlCol, tsFormatter } from '../../shared/grid';
+import { errorCellRules, serverGridOptions, minutesFormatter, numCol, pagedDatasource, sqlCol, tsFormatter } from '../../shared/grid';
 import { LogDetailDialog } from '../logs/log-detail-dialog';
 
 /** Drill-down: the original log rows that make up a group (server paged). */
@@ -36,7 +36,13 @@ export class GroupMembers {
     { field: 'userId', headerName: 'User', sortable: true, width: 120 },
     { field: 'startTime', headerName: 'Start time', sortable: true, width: 170, valueFormatter: tsFormatter },
     { field: 'durationMinutes', headerName: 'Duration', sortable: true, width: 115, sort: 'desc', valueFormatter: minutesFormatter, ...numCol },
-    { headerName: 'Error', width: 200, valueGetter: (p) => [p.data?.errorCode, p.data?.errorCategory].filter(Boolean).join(' · ') },
+    {
+      headerName: 'Error',
+      width: 200,
+      valueGetter: (p) => [p.data?.errorCode, p.data?.errorCategory].filter(Boolean).join(' · '),
+      tooltip: (p) => p.data?.errorMessage,
+      cellClassRules: errorCellRules,
+    },
     { field: 'seenCount', headerName: 'Loads', sortable: true, width: 90, ...numCol },
     { headerName: 'Executed query', valueGetter: (p) => p.data?.executedQuery || p.data?.userQuery, ...sqlCol, flex: 1, minWidth: 300 },
   ];

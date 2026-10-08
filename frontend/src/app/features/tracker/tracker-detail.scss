@@ -100,8 +100,15 @@
 }
 
 .iter-table {
+  // the original run (pre-tuning) row uses the "original" tint
   tr.baseline td {
-    background: var(--spt-panel-2);
+    background: color-mix(in srgb, var(--spt-pre) 70%, transparent);
+    color: var(--spt-pre-ink);
+    font-weight: 600;
+  }
+
+  tr.baseline td.muted {
+    font-weight: 400;
   }
 
   tr.best-row td {

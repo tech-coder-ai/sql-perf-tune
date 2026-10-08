@@ -133,6 +133,16 @@ export interface Tracker {
   workflowStatus: WorkflowStatus;
   priority: Priority;
   improvementPct: number | null;
+  /** change from original to post-implementation in % (negative = less) */
+  runDurationDeltaPct: number | null;
+  executionTimeDeltaPct: number | null;
+  teardownTimeDeltaPct: number | null;
+  /** percentage points */
+  teardownPctDeltaPts: number | null;
+  cpuDeltaPct: number | null;
+  rowsScannedDeltaPct: number | null;
+  tablesScannedDeltaPct: number | null;
+  peakMemoryDeltaPct: number | null;
   sqlEngine: string;
   ogCpuSeconds: number | null;
   postRunCpuSeconds: number | null;

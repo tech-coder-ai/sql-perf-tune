@@ -20,6 +20,7 @@ import {
   pagedDatasource,
   sqlCol,
   tsFormatter,
+  errorCellRules,
 } from '../../shared/grid';
 import { ImportDialog } from './import-dialog';
 import { LogDetailDialog } from './log-detail-dialog';
@@ -93,9 +94,9 @@ export class Logs implements OnInit {
     { field: 'createdAt', headerName: 'First loaded', sortable: true, width: 170, valueFormatter: tsFormatter, hide: true },
     { field: 'lastSeenAt', headerName: 'Last seen', sortable: true, width: 170, valueFormatter: tsFormatter },
     { field: 'userId', headerName: 'User', sortable: true, width: 120 },
-    { field: 'errorCode', headerName: 'Error code', sortable: true, width: 170 },
-    { field: 'errorCategory', headerName: 'Error category', sortable: true, width: 140 },
-    { field: 'errorMessage', headerName: 'Error message', width: 240, tooltip: (p) => p.data?.errorMessage },
+    { field: 'errorCode', headerName: 'Error code', sortable: true, width: 215, cellClassRules: errorCellRules },
+    { field: 'errorCategory', headerName: 'Error category', sortable: true, width: 140, cellClassRules: errorCellRules },
+    { field: 'errorMessage', headerName: 'Error message', width: 240, tooltip: (p) => p.data?.errorMessage, cellClassRules: errorCellRules },
     { headerName: 'Executed query', valueGetter: (p) => p.data?.executedQuery || p.data?.userQuery, ...sqlCol, flex: 1, minWidth: 320 },
     {
       field: 'groupId',
