@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -41,6 +42,7 @@ import jakarta.persistence.EntityManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.InputStreamSource;
 import org.springframework.stereotype.Service;
@@ -368,6 +370,13 @@ public class IngestionService {
         return tx.execute(s -> batches.save(b));
     }
 
+    /** The database's own message (e.g. ORA-12899 value too large for column ...), without wrapper noise. */
+    static String rootMessage(Throwable e) {
+        Throwable root = NestedExceptionUtils.getMostSpecificCause(e);
+        String m = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage().strip();
+        return Texts.truncate(m.replaceAll("\\s+", " "), 300);
+    }
+
     private static String summary(IngestionBatch b) {
         return b.getRowsDuplicate() == 0 ? null
                 : b.getRowsDuplicate() + " rows were already loaded and were not re-processed.";
@@ -393,6 +402,8 @@ public class IngestionService {
         /** row keys already handled in this load (new or sighted) - repeats inside one file are duplicates */
         private final Set<String> handled = new HashSet<>();
         private final List<QueryLog> buffer = new ArrayList<>();
+        /** source row number of each buffered row, for rejection messages */
+        private final Map<QueryLog, Long> rowNumbers = new IdentityHashMap<>();
 
         Loader(IngestionBatch batch) {
             this.batch = batch;
@@ -420,6 +431,7 @@ public class IngestionService {
                 return;
             }
             buffer.add(q);
+            rowNumbers.put(q, record.rowNumber());
             if (buffer.size() >= props.ingestion().batchSize()) {
                 flush();
             }
@@ -443,43 +455,68 @@ public class IngestionService {
             }
             List<QueryLog> chunk = new ArrayList<>(buffer);
             buffer.clear();
-            List<QueryLog> inserted = tx.execute(s -> {
-                LocalDateTime now = LocalDateTime.now();
-                Map<String, QueryLog> existing = logs.findByRowKeyIn(chunk.stream().map(QueryLog::getRowKey).toList())
-                        .stream().collect(Collectors.toMap(QueryLog::getRowKey, Function.identity()));
-                List<QueryLog> fresh = new ArrayList<>();
-                List<LogSighting> seen = new ArrayList<>();
+            List<QueryLog> inserted;
+            int failed = 0;
+            try {
+                inserted = tx.execute(s -> store(chunk));
+            } catch (CancelledException e) {
+                throw e;
+            } catch (RuntimeException chunkError) {
+                // One bad row (e.g. a value too long for an Oracle column) must not stop the import: retry the
+                // chunk row by row, reject only the rows the database refuses and keep going.
+                log.warn("Import #{}: chunk of {} rows failed ({}); retrying row by row", batch.getId(), chunk.size(),
+                        rootMessage(chunkError));
+                inserted = new ArrayList<>();
                 for (QueryLog q : chunk) {
-                    QueryLog known = existing.get(q.getRowKey());
-                    if (known != null) {
-                        known.setSeenCount(known.getSeenCount() + 1);
-                        known.setLastSeenAt(now);
-                        known.setLastSeenBatchId(batch.getId());
-                        seen.add(sighting(known.getId(), now, false));
-                    } else {
-                        q.setCreatedAt(now);
-                        q.setLastSeenAt(now);
-                        q.setLastSeenBatchId(batch.getId());
-                        grouping.applyFingerprint(q);
-                        fresh.add(q);
+                    q.setId(null);
+                    try {
+                        inserted.addAll(tx.execute(s -> store(List.of(q))));
+                    } catch (RuntimeException rowError) {
+                        failed++;
+                        reject(rowNumbers.getOrDefault(q, 0L), "not saved: " + rootMessage(rowError));
                     }
                 }
-                logs.saveAll(fresh);
-                em.flush();
-                fresh.forEach(q -> seen.add(sighting(q.getId(), now, true)));
-                sightings.saveAll(seen);
-                em.flush();
-                em.clear();
-                return fresh;
-            });
+            }
+            chunk.forEach(rowNumbers::remove);
             batch.setRowsLoaded(batch.getRowsLoaded() + inserted.size());
-            batch.setRowsDuplicate(batch.getRowsDuplicate() + chunk.size() - inserted.size());
+            batch.setRowsDuplicate(batch.getRowsDuplicate() + chunk.size() - inserted.size() - failed);
             progress(batch, "Read " + batch.getRowsRead() + " rows");
             for (QueryLog q : inserted) {
                 if (q.getFingerprint() != null) {
                     keys.add(new FingerprintKey(q.getSqlEngine(), q.getFingerprint()));
                 }
             }
+        }
+
+        /** Inserts the new rows of a chunk and records a sighting for every row; returns the new rows. */
+        private List<QueryLog> store(List<QueryLog> chunk) {
+            LocalDateTime now = LocalDateTime.now();
+            Map<String, QueryLog> existing = logs.findByRowKeyIn(chunk.stream().map(QueryLog::getRowKey).toList())
+                    .stream().collect(Collectors.toMap(QueryLog::getRowKey, Function.identity()));
+            List<QueryLog> fresh = new ArrayList<>();
+            List<LogSighting> seen = new ArrayList<>();
+            for (QueryLog q : chunk) {
+                QueryLog known = existing.get(q.getRowKey());
+                if (known != null) {
+                    known.setSeenCount(known.getSeenCount() + 1);
+                    known.setLastSeenAt(now);
+                    known.setLastSeenBatchId(batch.getId());
+                    seen.add(sighting(known.getId(), now, false));
+                } else {
+                    q.setCreatedAt(now);
+                    q.setLastSeenAt(now);
+                    q.setLastSeenBatchId(batch.getId());
+                    grouping.applyFingerprint(q);
+                    fresh.add(q);
+                }
+            }
+            logs.saveAll(fresh);
+            em.flush();
+            fresh.forEach(q -> seen.add(sighting(q.getId(), now, true)));
+            sightings.saveAll(seen);
+            em.flush();
+            em.clear();
+            return fresh;
         }
 
         private LogSighting sighting(Long logId, LocalDateTime now, boolean first) {
