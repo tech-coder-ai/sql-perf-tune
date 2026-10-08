@@ -245,9 +245,9 @@
             anchor="q6"
             q="Q6"
             title="How many bad queries are outstanding?"
-            [answer]="num(p.outstanding.patterns) + ' patterns are not tuned yet, covering ' + num(p.outstanding.badQueries) + ' bad queries.'"
+            [answer]="num(p.outstanding.patterns) + ' patterns with bad queries in the last ' + p.outstanding.activeDays + ' days are not adopted (' + num(p.outstanding.badQueries) + ' bad queries). All-time: ' + num(p.outstanding.allTimePatterns) + ' patterns, ' + num(p.outstanding.allTimeBadQueries) + ' bad queries.'"
             [table]="tableOf(q6Rows(p), 'Patterns')"
-            note="Outstanding = every pattern with bad queries that is not adopted."
+            [note]="'Outstanding = not adopted (untracked, in progress, on hold or rejected). Active = had bad queries in the ' + p.outstanding.activeDays + ' days up to ' + p.outstanding.asOf + '; all-time includes patterns that stopped running.'"
           >
             <app-bar-list [rows]="q6Rows(p)" [clickable]="true" />
             <div class="links">

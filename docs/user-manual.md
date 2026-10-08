@@ -168,12 +168,28 @@ Different selected columns, joins or GROUP BY make a different group.
 
 ## 5. Command center
 
-The start page answers "how was today and where do we stand?" Use the date control at the top right
+The start page answers "how was the day and where do we stand?" Use the date control at the top right
 (arrows step one day) to look at another day.
 
-- **Tiles:** bad queries today (Q1, with the change against the previous day), recurring (Q2), query
-  patterns (Q3), outstanding patterns (Q6), awaiting adoption (Q15) and time saved this month (Q5). The
-  Q-badge shows which Insights question the tile belongs to.
+A bad query is dated by its **start time**, not by when the file was loaded. The daily extract usually covers
+the day before, so "today" is often still empty in the morning. In that case the page opens on the **latest day
+that has data** and says so; picking an empty day later shows a link to the latest loaded day.
+
+| Tile | Counts | Window |
+|---|---|---|
+| Bad queries (Q1) | log rows that started on the selected day; change vs the day before | that day |
+| Recurring (Q2) | of those, rows whose pattern had already run on an earlier day | that day |
+| Query patterns (Q3) | distinct patterns (same SQL ignoring filters) that ran that day | that day |
+| Outstanding patterns (Q6) | patterns not adopted that had bad queries in the **last 30 days**; the all-time number is shown under it | 30 days up to the day |
+| Awaiting adoption (Q15) | tracker items in the stage *Awaiting adoption* | now |
+| Saved this month (Q5) | wall clock saved by adopted rewrites this calendar month | this month |
+| Last 14 days (chart) | bad queries per day for the 14 days up to the selected day | 14 days |
+
+The windows differ on purpose: one day, 14 days and 30 days are not meant to add up. The all-time outstanding
+number includes every pattern ever loaded that is not adopted, also ones that stopped running long ago.
+
+
+- **Tiles:** see the table above. The Q-badge shows which Insights question the tile belongs to.
 - **Bad queries by hour (Q8)**, **Tuning pipeline** (click a stage to open it on the pipeline board),
   **Top patterns of the day** and **the last 14 days**.
 - **All insights** opens the full Insights page.
@@ -201,6 +217,8 @@ The Insights page has an index on the left grouped as *Today*, *Tuning outcomes*
 - **Recurring:** the pattern had already been seen on an earlier day.
 - **Optimized:** the tracker item has at least one candidate iteration (stage *Candidate ready* or later).
 - **Outstanding:** a pattern that is not adopted yet: not tracked, in progress, on hold or rejected.
+  **Active** outstanding (the headline) also had bad queries in the 30 days up to the selected day; the
+  all-time figure counts every pattern ever loaded.
 - **Savings:** per-run saving of the adopted iteration (original minus adopted, from the profiles or the
   entered test results) × the pattern's runs per day in the 30 days before adoption × the days since adoption
   that fall in the period. Wall clock, Impala CPU, rows scanned and table scans are reported separately.
@@ -270,15 +288,18 @@ are shown in red.
   *Diagnostics & AI agent*, *Add iteration*, *Select best*, *Mark adopted*, *Reject*.
 - **Journey:** the stages from Triage to Adopted with the date each was reached and the days spent in it.
   Skipped stages are shown as such. Below it, **Next step** says what to do now.
-- **Tabs:**
-  1. **Overview:** before / after of run time, execution, teardown, Impala CPU, rows and tables scanned and
-     peak memory, from the original run and the selected iteration.
-  2. **Iterations:** every tuning attempt (§8.2). The compare icon on a row opens that iteration in
-     **Compare SQL**.
-  3. **Compare SQL:** the original query next to an optimized one, with the differences highlighted
+- **Tabs**, in the order the work progresses. The item opens on the tab of its current stage: Triage →
+  Tracking, Diagnosed to Tested → Iterations, Awaiting adoption → Compare SQL, Adopted / Rejected / On hold →
+  Results.
+  1. **Tracking:** triage and all tracking fields: theme, priority, owners, statuses (§8.3).
+  2. **SQL & diagnostics:** raw, formatted, cleansed (comments removed, still runnable) and optimized SQL,
+     plus a link to capture the explain plan / profile on the group page.
+  3. **Iterations:** every tuning attempt and its test results (§8.2). The compare icon on a row opens that
+     iteration in **Compare SQL**.
+  4. **Compare SQL:** the original query next to an optimized one, with the differences highlighted
      (§8.5).
-  4. **Tracking:** all tracking fields (§8.3).
-  5. **Queries:** raw, formatted, cleansed (comments removed, still runnable) and optimized SQL.
+  5. **Results:** before / after of run time, execution, teardown, Impala CPU, rows and tables scanned and
+     peak memory (original run vs the selected iteration), facts, problem and recommendations.
   6. **Log rows:** the underlying executions.
   7. **History:** who changed which field, when, from what to what, including every stage change.
 

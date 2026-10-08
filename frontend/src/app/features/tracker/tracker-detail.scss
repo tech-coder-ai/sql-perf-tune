@@ -212,3 +212,16 @@
     font: var(--mat-sys-body-medium);
   }
 }
+
+// ---- SQL & diagnostics tab
+.diag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--spt-accent-soft);
+  font-size: 13px;
+}
