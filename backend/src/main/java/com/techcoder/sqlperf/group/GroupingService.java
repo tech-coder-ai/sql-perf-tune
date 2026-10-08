@@ -3,9 +3,13 @@ package com.techcoder.sqlperf.group;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.techcoder.sqlperf.common.Texts;
@@ -29,7 +33,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class GroupingService {
 
     private static final Logger log = LoggerFactory.getLogger(GroupingService.class);
-    private static final int CHUNK = 200;
+    /** fingerprints per set-based recompute (stays under Oracle's 1000-expression IN list limit) */
+    private static final int CHUNK = 500;
 
     private final QueryLogRepository logs;
     private final QueryGroupRepository groups;
@@ -61,14 +66,21 @@ public class GroupingService {
         row.setFingerprint(Texts.isBlank(sql) ? null : fingerprinter.fingerprint(sql).fingerprint());
     }
 
-    /** Recomputes the given groups in chunked transactions. Returns the number of groups touched. */
+    /**
+     * Recomputes the given groups in chunked transactions. Returns the number of groups touched.
+     * Each chunk costs a fixed handful of statements (not several per group): on Oracle every statement is a
+     * network round trip, so this is what keeps imports fast.
+     */
     public int recompute(Collection<FingerprintKey> keys) {
-        List<FingerprintKey> list = new ArrayList<>(keys);
-        for (int i = 0; i < list.size(); i += CHUNK) {
-            List<FingerprintKey> chunk = list.subList(i, Math.min(list.size(), i + CHUNK));
-            tx.executeWithoutResult(s -> chunk.forEach(this::recomputeOne));
-        }
-        return list.size();
+        Map<String, List<String>> byEngine = keys.stream().collect(Collectors.groupingBy(FingerprintKey::sqlEngine,
+                LinkedHashMap::new, Collectors.mapping(FingerprintKey::fingerprint, Collectors.toList())));
+        byEngine.forEach((engine, fps) -> {
+            for (int i = 0; i < fps.size(); i += CHUNK) {
+                List<String> chunk = fps.subList(i, Math.min(fps.size(), i + CHUNK));
+                tx.executeWithoutResult(s -> recomputeChunk(engine, chunk));
+            }
+        });
+        return keys.size();
     }
 
     /**
@@ -103,40 +115,73 @@ public class GroupingService {
         return touched;
     }
 
-    private void recomputeOne(FingerprintKey key) {
-        QueryGroup g = groups.findBySqlEngineAndFingerprint(key.sqlEngine(), key.fingerprint()).orElseGet(() -> {
-            QueryGroup ng = new QueryGroup();
-            ng.setSqlEngine(key.sqlEngine());
-            ng.setFingerprint(key.fingerprint());
-            ng.setCreatedAt(LocalDateTime.now());
-            return ng;
-        });
-        GroupStats st = logs.stats(key.sqlEngine(), key.fingerprint());
-        g.setGroupSize((int) st.groupSize());
-        g.setDistinctUsers((int) st.distinctUsers());
-        g.setDurationCount((int) st.durationCount());
-        g.setAvgDurationMinutes(round(st.avgDuration()));
-        g.setMinDurationMinutes(round(st.minDuration()));
-        g.setMaxDurationMinutes(round(st.maxDuration()));
-        g.setTotalDurationMinutes(round(st.totalDuration()));
-        g.setErrorCount((int) st.errorCount());
-        g.setFirstSeen(st.firstSeen());
-        g.setLastSeen(st.lastSeen());
-        g.setUserIds(Texts.truncate(String.join(", ", logs.distinctUsers(key.sqlEngine(), key.fingerprint())), 4000));
-        g.setRowIndices(logs.seqIds(key.sqlEngine(), key.fingerprint()).stream()
-                .map(String::valueOf).collect(Collectors.joining(",")));
-
-        List<QueryLog> sample = logs.samples(key.sqlEngine(), key.fingerprint(), PageRequest.of(0, 1));
-        if (!sample.isEmpty()) {
-            QueryLog s = sample.getFirst();
-            g.setSampleLogId(s.getId());
-            g.setSampleQuerySeqId(s.getSeqId());
-            g.setSampleQuery(groupingSql(s));
-            g.setNormalizedQuery(fingerprinter.normalize(groupingSql(s)));
+    private void recomputeChunk(String engine, List<String> fps) {
+        Map<String, QueryGroup> existing = groups.findBySqlEngineAndFingerprintIn(engine, fps).stream()
+                .collect(Collectors.toMap(QueryGroup::getFingerprint, Function.identity()));
+        Map<String, GroupStats> stats = logs.stats(engine, fps).stream()
+                .collect(Collectors.toMap(GroupStats::fingerprint, Function.identity()));
+        Map<String, List<String>> users = pairs(logs.distinctUsers(engine, fps));
+        Map<String, List<String>> seqIds = pairs(logs.seqIds(engine, fps));
+        Map<String, Long> sampleIds = new HashMap<>();
+        for (Object[] row : logs.sampleCandidates(engine, fps)) {
+            sampleIds.putIfAbsent((String) row[0], (Long) row[1]);
         }
-        g.setUpdatedAt(LocalDateTime.now());
-        groups.save(g);
-        logs.assignGroup(key.sqlEngine(), key.fingerprint(), g.getId());
+        Map<Long, QueryLog> samples = logs.findAllById(sampleIds.values()).stream()
+                .collect(Collectors.toMap(QueryLog::getId, Function.identity()));
+
+        LocalDateTime now = LocalDateTime.now();
+        List<QueryGroup> changed = new ArrayList<>();
+        for (String fp : fps) {
+            QueryGroup g = existing.get(fp);
+            GroupStats st = stats.get(fp);
+            if (st == null) {
+                // no member rows left (e.g. after a fingerprint rule change): keep the group, show it empty
+                if (g != null) {
+                    clearStats(g);
+                    changed.add(g);
+                }
+                continue;
+            }
+            if (g == null) {
+                g = new QueryGroup();
+                g.setSqlEngine(engine);
+                g.setFingerprint(fp);
+                g.setCreatedAt(now);
+            }
+            g.setGroupSize((int) st.groupSize());
+            g.setDistinctUsers((int) st.distinctUsers());
+            g.setDurationCount((int) st.durationCount());
+            g.setAvgDurationMinutes(round(st.avgDuration()));
+            g.setMinDurationMinutes(round(st.minDuration()));
+            g.setMaxDurationMinutes(round(st.maxDuration()));
+            g.setTotalDurationMinutes(round(st.totalDuration()));
+            g.setErrorCount((int) st.errorCount());
+            g.setFirstSeen(st.firstSeen());
+            g.setLastSeen(st.lastSeen());
+            g.setUserIds(Texts.truncate(String.join(", ", users.getOrDefault(fp, List.of())), 4000));
+            g.setRowIndices(String.join(",", seqIds.getOrDefault(fp, List.of())));
+            QueryLog sample = samples.get(sampleIds.get(fp));
+            if (sample != null) {
+                g.setSampleLogId(sample.getId());
+                g.setSampleQuerySeqId(sample.getSeqId());
+                g.setSampleQuery(groupingSql(sample));
+                g.setNormalizedQuery(fingerprinter.normalize(groupingSql(sample)));
+            }
+            g.setUpdatedAt(now);
+            changed.add(g);
+        }
+        groups.saveAll(changed); // batched: pooled ids, see V5__pooled_ids.sql
+        groups.flush();
+        logs.assignGroups(engine, fps);
+    }
+
+    /** [fingerprint, value] rows (ordered by fingerprint) -> fingerprint -> values in order. */
+    private static Map<String, List<String>> pairs(List<Object[]> rows) {
+        Map<String, List<String>> out = new HashMap<>();
+        for (Object[] row : rows) {
+            out.computeIfAbsent((String) row[0], k -> new ArrayList<>()).add(String.valueOf(row[1]));
+        }
+        return out;
     }
 
     private static void clearStats(QueryGroup g) {

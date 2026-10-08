@@ -374,7 +374,8 @@ public class IngestionService {
     static String rootMessage(Throwable e) {
         Throwable root = NestedExceptionUtils.getMostSpecificCause(e);
         String m = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage().strip();
-        return Texts.truncate(m.replaceAll("\\s+", " "), 300);
+        // drop Oracle's help links ("https://docs.oracle.com/error-help/...") and collapse whitespace
+        return Texts.truncate(m.replaceAll("https?://\\S+", "").replaceAll("\\s+", " ").strip(), 300);
     }
 
     private static String summary(IngestionBatch b) {

@@ -21,6 +21,7 @@ import lombok.Setter;
 public class QueryLog {
 
     @Id
+    // IDENTITY on SQLite; on Oracle META-INF/orm-oracle.xml switches to pooled sequence ids (batched inserts)
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 

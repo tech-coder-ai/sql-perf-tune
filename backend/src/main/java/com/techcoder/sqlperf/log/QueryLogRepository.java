@@ -18,48 +18,61 @@ public interface QueryLogRepository extends JpaRepository<QueryLog, Long>, JpaSp
 
     long countByBatchId(Long batchId);
 
-    record GroupStats(long groupSize, long distinctUsers, long durationCount, Double avgDuration,
+    // ---- set-based group maintenance: one statement per query for a whole list of fingerprints
+    // (callers keep the list under Oracle's 1000-expression IN limit)
+
+    record GroupStats(String fingerprint, long groupSize, long distinctUsers, long durationCount, Double avgDuration,
                       Double minDuration, Double maxDuration, Double totalDuration, long errorCount,
                       LocalDateTime firstSeen, LocalDateTime lastSeen) {
     }
 
     @Query("""
             select new com.techcoder.sqlperf.log.QueryLogRepository$GroupStats(
-                count(l), count(distinct l.userId), count(l.durationMinutes),
+                l.fingerprint, count(l), count(distinct l.userId), count(l.durationMinutes),
                 avg(l.durationMinutes), min(l.durationMinutes), max(l.durationMinutes), sum(l.durationMinutes),
                 sum(case when l.errorCode is not null or l.errorCategory is not null then 1 else 0 end),
                 min(l.startTime), max(l.startTime))
-            from QueryLog l where l.sqlEngine = :engine and l.fingerprint = :fp
+            from QueryLog l where l.sqlEngine = :engine and l.fingerprint in :fps
+            group by l.fingerprint
             """)
-    GroupStats stats(@Param("engine") String engine, @Param("fp") String fingerprint);
+    List<GroupStats> stats(@Param("engine") String engine, @Param("fps") Collection<String> fingerprints);
 
+    /** [fingerprint, userId] pairs, ordered. */
     @Query("""
-            select distinct l.userId from QueryLog l
-            where l.sqlEngine = :engine and l.fingerprint = :fp and l.userId is not null
-            order by l.userId
+            select distinct l.fingerprint, l.userId from QueryLog l
+            where l.sqlEngine = :engine and l.fingerprint in :fps and l.userId is not null
+            order by l.fingerprint, l.userId
             """)
-    List<String> distinctUsers(@Param("engine") String engine, @Param("fp") String fingerprint);
+    List<Object[]> distinctUsers(@Param("engine") String engine, @Param("fps") Collection<String> fingerprints);
 
+    /** [fingerprint, seqId] pairs, ordered. */
     @Query("""
-            select l.seqId from QueryLog l
-            where l.sqlEngine = :engine and l.fingerprint = :fp and l.seqId is not null
-            order by l.seqId
+            select l.fingerprint, l.seqId from QueryLog l
+            where l.sqlEngine = :engine and l.fingerprint in :fps and l.seqId is not null
+            order by l.fingerprint, l.seqId
             """)
-    List<Long> seqIds(@Param("engine") String engine, @Param("fp") String fingerprint);
+    List<Object[]> seqIds(@Param("engine") String engine, @Param("fps") Collection<String> fingerprints);
 
-    /** Longest running member first; rows without a duration last. */
+    /**
+     * [fingerprint, id] of every member, longest running first within a fingerprint (rows without a duration
+     * last): the first id per fingerprint is the group's sample ("bad SQL").
+     */
     @Query("""
-            select l from QueryLog l where l.sqlEngine = :engine and l.fingerprint = :fp
-            order by case when l.durationMinutes is null then 1 else 0 end, l.durationMinutes desc, l.id
+            select l.fingerprint, l.id from QueryLog l where l.sqlEngine = :engine and l.fingerprint in :fps
+            order by l.fingerprint, case when l.durationMinutes is null then 1 else 0 end, l.durationMinutes desc, l.id
             """)
-    List<QueryLog> samples(@Param("engine") String engine, @Param("fp") String fingerprint, Pageable pageable);
+    List<Object[]> sampleCandidates(@Param("engine") String engine, @Param("fps") Collection<String> fingerprints);
 
+    /** Points every row of the fingerprints at its group. */
     @Modifying
     @Query("""
-            update QueryLog l set l.groupId = :groupId
-            where l.sqlEngine = :engine and l.fingerprint = :fp and (l.groupId is null or l.groupId <> :groupId)
+            update QueryLog l set l.groupId = (
+                select g.id from QueryGroup g where g.sqlEngine = l.sqlEngine and g.fingerprint = l.fingerprint)
+            where l.sqlEngine = :engine and l.fingerprint in :fps
+              and (l.groupId is null or l.groupId <> (
+                select g2.id from QueryGroup g2 where g2.sqlEngine = l.sqlEngine and g2.fingerprint = l.fingerprint))
             """)
-    int assignGroup(@Param("engine") String engine, @Param("fp") String fingerprint, @Param("groupId") Long groupId);
+    int assignGroups(@Param("engine") String engine, @Param("fps") Collection<String> fingerprints);
 
     record FingerprintKey(String sqlEngine, String fingerprint) {
     }

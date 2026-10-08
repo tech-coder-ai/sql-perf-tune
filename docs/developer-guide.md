@@ -108,7 +108,22 @@ docs/                             architecture, developer guide, user manual
 `SPT_CUSTOM_FIELD(_VALUE)`, `SPT_AUDIT_EVENT`, `SPT_DATA_SOURCE`, `SPT_LOOKUP`, `SPT_USER_DIRECTORY`.
 
 Migrations: V1 core schema, V2 prompt seed, V3 load de-duplication, V4 analytics and iterations (lookups,
-iterations, stage timestamps, CPU / scan metrics, user directory, request source). See [architecture.md](architecture.md) for the ER diagram.
+iterations, stage timestamps, CPU / scan metrics, user directory, request source), V5 pooled ids (Oracle
+sequences, see §5). See [architecture.md](architecture.md) for the ER diagram.
+
+### Oracle in Docker (local)
+
+```bash
+docker run -d --name spt-oracle -p 1521:1521 -e ORACLE_PASSWORD=<sys-pwd> \
+  -e APP_USER=SPT_APP -e APP_USER_PASSWORD=<app-pwd> gvenzl/oracle-free:23-slim-faststart
+# wait for "DATABASE IS READY TO USE!" in `docker logs spt-oracle`, then:
+SPRING_PROFILES_ACTIVE=oracle SPT_DB_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 \
+  SPT_DB_USER=SPT_APP SPT_DB_PASSWORD=<app-pwd> mvn spring-boot:run
+```
+
+Flyway creates the schema on first start. `db/oracle/01_drop_and_create_schema.sql` (run with SQL*Plus / SQLcl)
+resets it to an empty schema with initial values; then start once with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`
+and `SPRING_FLYWAY_BASELINE_VERSION=5`.
 
 ---
 
@@ -154,6 +169,25 @@ fails or is cancelled, the fingerprints of the rows it inserted are regrouped, s
 on the groups screen. `IngestionRecovery` runs at start-up: batches still `RUNNING` (server stopped mid-import)
 become `FAILED` ("Interrupted…") and any log rows without a group are grouped.
 
+**Round trips (performance).** On Oracle every statement is a network round trip, so an import must not issue
+statements per row or per pattern:
+
+- Log rows, sightings and groups take **pooled ids** on Oracle: sequences `SPT_QUERY_LOG_SEQ`,
+  `SPT_QUERY_LOG_SIGHTING_SEQ`, `SPT_QUERY_GROUP_SEQ` (`INCREMENT BY 1000`, Hibernate `pooled-lo` optimizer),
+  mapped in `META-INF/orm-oracle.xml` (Oracle profile only). Hibernate numbers the rows itself and sends
+  INSERT / UPDATE statements as JDBC batches of 100 (`hibernate.jdbc.batch_size`, `order_inserts`,
+  `order_updates`). SQLite keeps `IDENTITY` (it has no sequences, and the table emulation needs a second
+  connection, while the SQLite pool has one).
+- `PooledIdGuard` (Oracle) moves a sequence past `MAX(ID)` at start-up if rows were inserted without it
+  (DBA script, older instance during an upgrade); otherwise inserts would fail with ORA-00001.
+- Groups are recomputed set-wise (`GroupingService.recompute`): ~8 statements per 500 patterns.
+- A chunk the database refuses is retried row by row; only refused rows are rejected (with the ORA message).
+  Values are truncated to VARCHAR2 **byte** limits (`Texts.truncate`).
+
+Measured on Oracle 23 Free (same host), 2000 rows / 300 patterns: **6,125 → 47 statements**, 8.4 s → 1.4 s.
+Over a network with 10 ms per round trip the old path waited about a minute; the new one under a second.
+`ImportRoundTripTest` guards the statement count (SQLite) and `ImportRoundTripOracleIT` on Oracle.
+
 Endpoints: `POST /api/ingestion/upload`, `POST /api/ingestion/pull/{id}`, `GET /api/ingestion/batches`,
 `GET /api/ingestion/batches/{id}`, `POST /api/ingestion/batches/{id}/cancel`, `GET /api/ingestion/files`,
 `GET /api/logs/{id}/history`.
@@ -163,8 +197,8 @@ Endpoints: `POST /api/ingestion/upload`, `POST /api/ingestion/pull/{id}`, `GET /
 ## 6. Grouping
 
 `SqlFingerprinter` tokenizes the SQL, drops every WHERE clause (any depth), masks literals, collapses
-`IN (?, ?)` lists and hashes the result. `GroupingService.recompute` rebuilds a group's aggregates from all
-its member rows (idempotent). `POST /api/groups/rebuild` re-fingerprints everything after you change
+`IN (?, ?)` lists and hashes the result. `GroupingService.recompute` rebuilds the aggregates of up to 500
+groups at a time from all their member rows with set-based queries (idempotent). `POST /api/groups/rebuild` re-fingerprints everything after you change
 `spt.fingerprint.*`. Unit tests: `SqlFingerprinterTest`.
 
 ---
@@ -368,7 +402,10 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 ## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 19 tests incl. ingestion / de-duplication and the tuning lifecycle on SQLite
+cd backend && mvn test                     # 22 tests incl. ingestion / de-duplication and the tuning lifecycle on SQLite
+# the same import round-trip test against a real Oracle (container above):
+SPT_TEST_ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 SPT_TEST_ORACLE_USER=SPT_APP \
+  SPT_TEST_ORACLE_PASSWORD=<app-pwd> mvn test -Dtest=ImportRoundTripOracleIT
 cd frontend && npx ng test --watch=false   # Vitest
 cd frontend && npx ng build                # production build + bundle budgets
 ```

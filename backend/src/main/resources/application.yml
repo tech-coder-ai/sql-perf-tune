@@ -18,6 +18,9 @@ spring:
       hibernate:
         jdbc.batch_size: 100
         order_inserts: true
+        order_updates: true
+        # sequence value = first id of a block of allocationSize ids (see V5__pooled_ids.sql)
+        id.optimizer.pooled.preferred: pooled-lo
   flyway:
     locations: classpath:db/migration/sqlite
   servlet:

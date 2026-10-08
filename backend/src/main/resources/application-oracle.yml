@@ -9,6 +9,8 @@ spring:
       maximum-pool-size: ${SPT_DB_POOL_SIZE:20}
   jpa:
     database-platform: org.hibernate.dialect.OracleDialect
+    # pooled sequence ids for logs / sightings / groups so inserts are batched (one round trip per 100 rows)
+    mapping-resources: META-INF/orm-oracle.xml
   flyway:
     locations: classpath:db/migration/oracle
     # set to the schema owner if the app user differs from the owner
