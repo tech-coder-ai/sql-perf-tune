@@ -47,7 +47,9 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li><b>Pattern</b>: a query group (same SQL ignoring WHERE filters).</li>
  *   <li><b>Recurring</b>: the pattern had already been seen on an earlier day.</li>
  *   <li><b>Optimized</b>: the tracker item has a tested / selected / adopted iteration (status Candidate ready or later).</li>
- *   <li><b>Outstanding</b>: a pattern that is not adopted yet (untracked, in progress, on hold or rejected).</li>
+ *   <li><b>Outstanding</b>: a pattern that is not adopted yet (untracked, in progress, on hold or rejected).
+ *       <b>Active</b> outstanding: such a pattern that also had bad queries in the last {@value #ACTIVE_DAYS} days up to
+ *       the reference day; patterns that stopped running long ago are only in the all-time numbers.</li>
  *   <li><b>Estimated savings</b>: per-run saving x the pattern's run rate in the 30 days before adoption
  *       x the days since adoption that fall in the period.</li>
  * </ul>
@@ -62,6 +64,8 @@ public class InsightsService {
     private static final Set<WorkflowStatus> OPTIMIZED = Set.of(WorkflowStatus.OPTIMIZED,
             WorkflowStatus.POST_RUN_VALIDATED, WorkflowStatus.SME_VALIDATION, WorkflowStatus.ADOPTED);
     private static final double DEFAULT_IMPROVEMENT_PCT = 50d;
+    /** window for "active" outstanding patterns (Q6 headline, Command center) */
+    static final int ACTIVE_DAYS = 30;
     private static final String NOT_TRACKED = "Not tracked";
     private static final String UNCATEGORIZED = "Uncategorized";
 
@@ -93,7 +97,7 @@ public class InsightsService {
                         long newPatterns, long recurringPatterns, long recurringQueries, long repeatedTodayPatterns,
                         double totalMinutes, List<CountPoint> byHour, List<CountPoint> last14Days,
                         List<PatternCount> topPatterns, List<CountPoint> instanceBuckets, List<CountPoint> topUsers,
-                        Integer peakHour) {
+                        Integer peakHour, LocalDate latestDataDay) {
     }
 
     public Daily daily(LocalDate date) {
@@ -180,7 +184,7 @@ public class InsightsService {
 
         double minutes = minutesPerGroup.values().stream().mapToDouble(Double::doubleValue).sum();
         return new Daily(date, bad, prev, perGroup.size(), newPatterns, recurringPatterns, recurringQueries, repeated,
-                round1(minutes), byHour, last14, top, instanceBuckets, topUsers, peak);
+                round1(minutes), byHour, last14, top, instanceBuckets, topUsers, peak, latestDataDay());
     }
 
     // =====================================================================================================
@@ -199,8 +203,13 @@ public class InsightsService {
                            List<ThemeCount> themes) {
     }
 
+    /**
+     * Q6. The headline is the <b>active</b> backlog: not adopted and with bad queries in the last {@code activeDays}
+     * days up to {@code asOf}. The all-time figures count every pattern ever loaded that is not adopted.
+     */
     public record Outstanding(long patterns, long badQueries, long untrackedPatterns, long inProgressPatterns,
-                              long awaitingAdoptionPatterns, long onHoldOrRejectedPatterns) {
+                              long awaitingAdoptionPatterns, long onHoldOrRejectedPatterns, int activeDays,
+                              LocalDate asOf, long allTimePatterns, long allTimeBadQueries, long allTimeUntrackedPatterns) {
     }
 
     public record AwaitingItem(Long trackerId, Long groupId, String sqlSnippet, String theme, Integer daysWaiting,
@@ -236,22 +245,44 @@ public class InsightsService {
         all.forEach(t -> byStatus.merge(t.getWorkflowStatus(), 1L, Long::sum));
         List<StageCount> stages = byStatus.entrySet().stream().map(e -> new StageCount(e.getKey(), e.getValue())).toList();
 
-        // Q6 outstanding = every pattern with bad queries that is not adopted
+        // Q6 outstanding: patterns that are not adopted. Active = had bad queries in the window up to the day after
+        // the prior day (i.e. the day being looked at); all-time = every pattern ever loaded.
         Map<Long, TuningTracker> byGroup = all.stream().collect(Collectors.toMap(TuningTracker::getGroupId, Function.identity()));
+        LocalDate asOf = priorDay.plusDays(1);
+        LocalDateTime activeTo = asOf.plusDays(1).atStartOfDay();
+        LocalDateTime activeFrom = activeTo.minusDays(ACTIVE_DAYS);
+        Map<Long, Long> recent = new HashMap<>();
+        for (Object[] r : em.createQuery("select l.groupId, count(l) from QueryLog l where " + TS + " >= :f and " + TS
+                        + " < :t and l.groupId is not null group by l.groupId", Object[].class)
+                .setParameter("f", activeFrom).setParameter("t", activeTo).getResultList()) {
+            recent.put((Long) r[0], (Long) r[1]);
+        }
         long outPatterns = 0;
         long outQueries = 0;
         long untracked = 0;
         long inProgress = 0;
         long awaiting = 0;
         long parked = 0;
+        long allPatterns = 0;
+        long allQueries = 0;
+        long allUntracked = 0;
         for (Object[] r : em.createQuery("select g.id, g.groupSize from QueryGroup g where g.groupSize > 0", Object[].class)
                 .getResultList()) {
             TuningTracker t = byGroup.get((Long) r[0]);
             if (t != null && t.getWorkflowStatus() == WorkflowStatus.ADOPTED) {
                 continue;
             }
+            allPatterns++;
+            allQueries += ((Number) r[1]).longValue();
+            if (t == null) {
+                allUntracked++;
+            }
+            Long active = recent.get((Long) r[0]);
+            if (active == null) {
+                continue;
+            }
             outPatterns++;
-            outQueries += ((Number) r[1]).longValue();
+            outQueries += active;
             if (t == null) {
                 untracked++;
             } else if (t.getWorkflowStatus() == WorkflowStatus.SME_VALIDATION) {
@@ -262,7 +293,8 @@ public class InsightsService {
                 inProgress++;
             }
         }
-        Outstanding outstanding = new Outstanding(outPatterns, outQueries, untracked, inProgress, awaiting, parked);
+        Outstanding outstanding = new Outstanding(outPatterns, outQueries, untracked, inProgress, awaiting, parked,
+                ACTIVE_DAYS, asOf, allPatterns, allQueries, allUntracked);
 
         // Q4 prior day: of the patterns that produced bad queries that day, how many are optimized / categorized
         LocalDateTime pf = priorDay.atStartOfDay();
@@ -716,6 +748,12 @@ public class InsightsService {
     // =====================================================================================================
     // helpers
     // =====================================================================================================
+
+    /** The most recent day with any bad query (null when no logs are loaded). */
+    private LocalDate latestDataDay() {
+        String day = em.createQuery("select max(" + DAY + ") from QueryLog l", String.class).getSingleResult();
+        return day == null ? null : LocalDate.parse(day.substring(0, 10));
+    }
 
     private long count(LocalDateTime from, LocalDateTime to) {
         return em.createQuery("select count(l) from QueryLog l where " + TS + " >= :f and " + TS + " < :t", Long.class)

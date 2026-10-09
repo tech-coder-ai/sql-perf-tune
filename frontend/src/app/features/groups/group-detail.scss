@@ -85,3 +85,31 @@
     grid-template-columns: 1fr;
   }
 }
+
+// ---- optimization: prompt preview and the steps of a pending run
+.preview .run-head {
+  flex-wrap: wrap;
+}
+
+.missing {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--spt-warn) 12%, transparent);
+  font-size: 13px;
+
+  mat-icon {
+    color: var(--spt-warn);
+    flex: 0 0 auto;
+  }
+}
+
+.howto {
+  margin: 10px 0 6px;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--spt-muted);
+}

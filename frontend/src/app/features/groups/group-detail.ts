@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, input, signal } from '@angular/core';
+import { Component, computed, OnInit, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatExpansionModule } from '@angular/material/expansion';
@@ -17,6 +17,7 @@ import {
   Feedback,
   Iteration,
   OptimizationRun,
+  PromptPreview,
   PromptTemplate,
   QueryGroup,
   SqlDiagnostic,
@@ -28,6 +29,17 @@ import { StatusChip } from '../../shared/status-chip';
 import { GroupMembers } from './group-members';
 
 /** One query group with its tuning workflow artefacts (diagram steps 4-12). */
+/** What a missing prompt input is called on screen, and where it is captured. */
+const MISSING_LABELS: Record<string, string> = {
+  bad_sql: 'bad SQL',
+  ddl: 'table DDL (DDL tab)',
+  row_counts: 'row counts (DDL tab)',
+  explain: 'explain plan (Diagnostics tab)',
+  profile_summary: 'query profile (Diagnostics tab)',
+  exec_summary: 'execution summary (Diagnostics tab)',
+  result_row_count: 'result row count (Diagnostics tab)',
+};
+
 @Component({
   selector: 'app-group-detail',
   imports: [
@@ -67,10 +79,15 @@ export class GroupDetail implements OnInit {
   readonly iterations = signal<Iteration[]>([]);
   protected readonly lookups = inject(LookupStore);
   readonly busy = signal(false);
+  /** prompt of the chosen template, rendered for this group (shown before a run is started) */
+  readonly preview = signal<PromptPreview | null>(null);
+  /** the run waiting for the LLM answer, if any: its prompt is shown instead of the preview */
+  readonly pendingRun = computed(() => this.runs().find((r) => r.status === 'PENDING') ?? null);
 
   diag = this.emptyDiag();
   ddl = { tableName: '', ddlText: '', rowCount: null as number | null };
-  promptTemplateId: number | null = null;
+  /** 0 = the active template for the group's engine (a null option would render the select as empty) */
+  promptTemplateId = 0;
   responses: Record<number, { text: string; model: string }> = {};
   fb = {
     sourceRole: 'CLIENT_DEV',
@@ -111,6 +128,19 @@ export class GroupDetail implements OnInit {
         this.api.iterations(r.group.trackerId).subscribe((i) => this.iterations.set(i));
       }
     });
+    this.loadPreview();
+  }
+
+  /** Renders the chosen template for this group (called on load and whenever the template changes). */
+  loadPreview(): void {
+    this.api.promptPreview(this.groupId, this.promptTemplateId || null).subscribe({
+      next: (p) => this.preview.set(p),
+      error: () => this.preview.set(null),
+    });
+  }
+
+  missingLabel(key: string): string {
+    return MISSING_LABELS[key] ?? key.replaceAll('_', ' ');
   }
 
   track(): void {
@@ -168,7 +198,7 @@ export class GroupDetail implements OnInit {
   // ---- optimization
   startRun(): void {
     this.busy.set(true);
-    this.api.startRun(this.groupId, this.promptTemplateId ?? undefined).subscribe({
+    this.api.startRun(this.groupId, this.promptTemplateId || undefined).subscribe({
       next: (r) => {
         this.busy.set(false);
         this.snack.open(

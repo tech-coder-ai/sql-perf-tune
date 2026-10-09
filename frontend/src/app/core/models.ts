@@ -310,6 +310,8 @@ export interface DailyInsight {
   instanceBuckets: CountPoint[];
   topUsers: CountPoint[];
   peakHour: number | null;
+  /** most recent day that has any bad query (null when nothing is loaded) */
+  latestDataDay: string | null;
 }
 
 export interface PipelineInsight {
@@ -321,6 +323,12 @@ export interface PipelineInsight {
     inProgressPatterns: number;
     awaitingAdoptionPatterns: number;
     onHoldOrRejectedPatterns: number;
+    /** the figures above are the active backlog: bad queries in the last activeDays days up to asOf */
+    activeDays: number;
+    asOf: string;
+    allTimePatterns: number;
+    allTimeBadQueries: number;
+    allTimeUntrackedPatterns: number;
   };
   priorDay: {
     date: string;
@@ -558,6 +566,16 @@ export interface TableDdl {
   ddlText: string | null;
   rowCount: number | null;
   capturedAt: string;
+}
+
+/** A prompt rendered for a group without starting a run. */
+export interface PromptPreview {
+  promptTemplateId: number;
+  templateName: string;
+  versionNo: number;
+  promptText: string;
+  /** template placeholders whose input is not captured yet, e.g. "ddl", "explain" */
+  missingInputs: string[];
 }
 
 export interface OptimizationRun {

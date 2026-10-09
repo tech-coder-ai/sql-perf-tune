@@ -82,12 +82,14 @@ class TuningLifecycleTest {
         LocalDate today = LocalDate.now();
         String y = today.minusDays(1) + " 09:00:00";
         String t = today + " 10:00:00";
+        String old = today.minusDays(60) + " 08:00:00";
         ingestion.importFile("life.csv", new ByteArrayResource(("""
                 seq_id,executed_query,user_id,start_time,duration_minutes
                 1,"select f.a, d.b from db.fact f join db.dim d on f.k = d.k where f.dt = '1'",alice,%s,10
                 2,"select f.a, d.b from db.fact f join db.dim d on f.k = d.k where f.dt = '2'",bob,%s,12
                 3,select x from db.other where y = 1,alice,%s,3
-                """.formatted(y, t, t)).getBytes(StandardCharsets.UTF_8)), null);
+                4,select z from db.retired where y = 1,carol,%s,7
+                """.formatted(y, t, t, old)).getBytes(StandardCharsets.UTF_8)), null);
         QueryGroup g = groups.findAll().stream().filter(x -> x.getGroupSize() == 2).findFirst().orElseThrow();
 
         // Q1-Q3: today 2 bad queries, the join pattern recurs from yesterday
@@ -101,9 +103,20 @@ class TuningLifecycleTest {
         // per-day buckets land on the right calendar day (guards against dialect day() quirks)
         assertThat(daily.last14Days().getLast().count()).isEqualTo(2);
         assertThat(daily.last14Days().get(12).count()).isEqualTo(1);
+        assertThat(daily.latestDataDay()).isEqualTo(today);
+        // a day without loaded logs is empty, but tells where the latest data is
+        InsightsService.Daily future = insights.daily(today.plusDays(3));
+        assertThat(future.badQueries()).isZero();
+        assertThat(future.latestDataDay()).isEqualTo(today);
 
         TrackerDto tr = trackers.createForGroups(List.of(g.getId())).getFirst();
         assertThat(tr.workflowStatus()).isEqualTo(WorkflowStatus.NEW);
+
+        // choosing a prompt template shows the rendered prompt at once, without starting a run
+        WorkflowService.PromptPreview preview = workflow.previewPrompt(g.getId(), null);
+        assertThat(preview.promptText()).contains("db.fact").doesNotContain("{{bad_sql}}");
+        assertThat(preview.missingInputs()).contains("ddl", "explain", "profile_summary");
+        assertThat(workflow.runs(g.getId())).isEmpty();
 
         // dropdown fields only take configured values
         assertThatThrownBy(() -> trackers.update(tr.trackerId(), update(tr, "Not a theme")))
@@ -158,8 +171,13 @@ class TuningLifecycleTest {
         // Q4/Q6/Q9/Q15
         InsightsService.Pipeline p = insights.pipeline(today.minusDays(1), today.minusDays(30), today);
         assertThat(p.priorDay().optimizedPatterns()).isEqualTo(1);
-        assertThat(p.outstanding().patterns()).isEqualTo(1); // the untracked "other" pattern
+        // active backlog: the untracked "other" pattern; the "retired" one last ran 60 days ago (all-time only)
+        assertThat(p.outstanding().patterns()).isEqualTo(1);
+        assertThat(p.outstanding().badQueries()).isEqualTo(1);
         assertThat(p.outstanding().untrackedPatterns()).isEqualTo(1);
+        assertThat(p.outstanding().asOf()).isEqualTo(today);
+        assertThat(p.outstanding().allTimePatterns()).isEqualTo(2);
+        assertThat(p.outstanding().allTimeUntrackedPatterns()).isEqualTo(2);
         assertThat(p.rejections().inaccurate()).isEqualTo(1);
         assertThat(p.turnaround().adoptedItems()).isEqualTo(1);
 

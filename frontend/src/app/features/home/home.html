@@ -7,13 +7,32 @@
     <span class="spacer"></span>
     <div class="date-nav">
       <button mat-icon-button (click)="shift(-1)" aria-label="Previous day"><mat-icon>chevron_left</mat-icon></button>
-      <input type="date" [value]="date()" (change)="setDate($any($event.target).value)" aria-label="Day" />
+      <input
+        type="date"
+        [value]="date()"
+        [max]="maxDate"
+        (input)="setDate($any($event.target).value)"
+        (change)="setDate($any($event.target).value)"
+        aria-label="Day"
+      />
       <button mat-icon-button (click)="shift(1)" [disabled]="isToday()" aria-label="Next day"><mat-icon>chevron_right</mat-icon></button>
     </div>
     <a mat-stroked-button routerLink="/insights"><mat-icon>insights</mat-icon> All insights</a>
   </div>
 
   @if (daily(); as d) {
+    @if (movedFrom(); as was) {
+      <div class="notice" role="status">
+        <mat-icon>info</mat-icon>
+        <span>No bad queries are loaded for {{ was }} yet (the daily extract usually covers the day before). Showing <strong>{{ d.date }}</strong>, the latest day with data.</span>
+      </div>
+    } @else if (d.badQueries === 0 && d.latestDataDay && d.latestDataDay !== d.date) {
+      <div class="notice" role="status">
+        <mat-icon>info</mat-icon>
+        <span>No bad queries on {{ d.date }}. The latest loaded day is <strong>{{ d.latestDataDay }}</strong>.</span>
+        <button mat-button (click)="showLatest(d)">Show {{ d.latestDataDay }}</button>
+      </div>
+    }
     <div class="tiles">
       <app-stat-tile
         class="hero-tile"
@@ -49,14 +68,14 @@
           icon="pending_actions"
           label="Outstanding patterns"
           [value]="num(p.outstanding.patterns)"
-          [hint]="num(p.outstanding.badQueries) + ' bad queries not yet tuned'"
+          [hint]="'active in the last ' + p.outstanding.activeDays + ' days · ' + num(p.outstanding.allTimePatterns) + ' all-time'"
           link="/pipeline"
         />
         <app-stat-tile
           q="Q15"
           icon="hourglass_top"
           label="Awaiting adoption"
-          [value]="num(p.outstanding.awaitingAdoptionPatterns)"
+          [value]="num(stageCount(p, 'SME_VALIDATION'))"
           [hint]="p.rejections.total + ' rejections in 90 days'"
           link="/pipeline"
         />

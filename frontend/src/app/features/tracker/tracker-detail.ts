@@ -23,6 +23,7 @@ import {
   REQUEST_SOURCES,
   Tracker,
   WORKFLOW_STATUSES,
+  WorkflowStatus,
 } from '../../core/models';
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { minutesText, num, secondsText } from '../../shared/dates';
@@ -53,6 +54,22 @@ interface MetricRow {
   /** lower is better */
   lower: boolean;
 }
+
+/** Tabs in the order the work progresses (triage -> SQL & diagnostics -> tune & test -> compare -> results). */
+const TAB = { tracking: 0, sql: 1, iterations: 2, compare: 3, results: 4, logRows: 5, history: 6 } as const;
+
+/** The tab an item opens on: where its current stage's work happens. */
+const STAGE_TAB: Record<WorkflowStatus, number> = {
+  NEW: TAB.tracking,
+  DIAGNOSTICS_CAPTURED: TAB.iterations,
+  OPTIMIZATION_REQUESTED: TAB.iterations,
+  OPTIMIZED: TAB.iterations,
+  POST_RUN_VALIDATED: TAB.iterations,
+  SME_VALIDATION: TAB.compare,
+  ADOPTED: TAB.results,
+  REJECTED: TAB.results,
+  ON_HOLD: TAB.results,
+};
 
 /** Dropdown-backed tracker fields: property -> lookup category + label. */
 const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
@@ -124,7 +141,10 @@ export class TrackerDetail implements OnInit {
   protected readonly history = signal<AuditEvent[]>([]);
   protected readonly customFields = signal<CustomField[]>([]);
   protected readonly saving = signal(false);
-  protected readonly tab = signal(0);
+  protected readonly TAB = TAB;
+  protected readonly tab = signal<number>(TAB.tracking);
+  /** the first load opens the tab of the item's current stage; later reloads keep the user's tab */
+  private stageTabChosen = false;
   /** working copy bound to the form (fields mutated in place by ngModel) */
   protected readonly model = signal<Tracker | null>(null);
 
@@ -236,6 +256,10 @@ export class TrackerDetail implements OnInit {
     this.api.tracker(id).subscribe((t) => {
       this.saved.set(t);
       this.model.set(this.copy(t));
+      if (!this.stageTabChosen) {
+        this.stageTabChosen = true;
+        this.tab.set(STAGE_TAB[t.workflowStatus] ?? TAB.tracking);
+      }
     });
     this.api.journey(id).subscribe((j) => this.journey.set(j));
     this.api.iterations(id).subscribe((i) => this.iterations.set(i));
@@ -288,7 +312,7 @@ export class TrackerDetail implements OnInit {
   compareWith(i: Iteration): void {
     this.compareLeft.set('original');
     this.compareRight.set('it:' + i.id);
-    this.tab.set(2);
+    this.tab.set(TAB.compare);
   }
 
   swapCompare(): void {
@@ -303,7 +327,7 @@ export class TrackerDetail implements OnInit {
   }
 
   startNewIteration(): void {
-    this.tab.set(1);
+    this.tab.set(TAB.iterations);
     this.newIteration = { optimizedSql: '', changeNarrative: '', notes: '' };
   }
 

@@ -74,6 +74,7 @@ frontend/
   src/app/features/    home (command center), insights, pipeline, logs, groups, tracker, admin
 db/oracle/00_create_schema.sql    one-off DBA script (users / grants)
 db/oracle/01_drop_and_create_schema.sql   drop + re-create all tables / views + initial values
+db/oracle/02_command_center_metrics.sql   the Command center metrics as plain SQL (checks)
 samples/                          sample input logs and user directory
 docs/                             architecture, developer guide, user manual
 ```
