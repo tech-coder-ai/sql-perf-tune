@@ -7,7 +7,14 @@
     <span class="spacer"></span>
     <div class="date-nav">
       <button mat-icon-button (click)="shift(-1)" aria-label="Previous day"><mat-icon>chevron_left</mat-icon></button>
-      <input type="date" [value]="date()" (change)="setDate($any($event.target).value)" aria-label="Day" />
+      <input
+        type="date"
+        [value]="date()"
+        [max]="maxDate"
+        (input)="setDate($any($event.target).value)"
+        (change)="setDate($any($event.target).value)"
+        aria-label="Day"
+      />
       <button mat-icon-button (click)="shift(1)" [disabled]="isToday()" aria-label="Next day"><mat-icon>chevron_right</mat-icon></button>
     </div>
     <a mat-stroked-button routerLink="/insights"><mat-icon>insights</mat-icon> All insights</a>
