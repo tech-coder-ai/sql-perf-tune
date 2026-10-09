@@ -248,15 +248,39 @@ public class WorkflowService {
     // ------------------------------------------------------------------ optimization (steps 7-9)
 
     @Transactional
-    public OptimizationRun startOptimization(Long groupId, Long promptTemplateId) {
+    /** The prompt a run would send, rendered for the group, plus the inputs not captured yet (nothing is stored). */
+    public record PromptPreview(Long promptTemplateId, String templateName, int versionNo, String promptText,
+                                List<String> missingInputs) {
+    }
+
+    @Transactional(readOnly = true)
+    public PromptPreview previewPrompt(Long groupId, Long promptTemplateId) {
         QueryGroup g = group(groupId);
-        PromptTemplate tpl = promptTemplateId != null
+        PromptTemplate tpl = template(g, promptTemplateId);
+        SqlDiagnostic original = latestOriginal(groupId);
+        List<TableDdl> groupDdls = ddls.findByGroupIdOrderByIdDesc(groupId);
+        return new PromptPreview(tpl.getId(), tpl.getName(), tpl.getVersionNo(),
+                renderer.render(tpl.getTemplateText(), g, original, groupDdls),
+                renderer.missing(tpl.getTemplateText(), g, original, groupDdls));
+    }
+
+    private PromptTemplate template(QueryGroup g, Long promptTemplateId) {
+        return promptTemplateId != null
                 ? prompts.findById(promptTemplateId).orElseThrow(() -> new NotFoundException("Prompt template", promptTemplateId))
                 : prompts.findFirstBySqlEngineAndActiveTrueOrderByVersionNoDesc(g.getSqlEngine())
                         .orElseThrow(() -> new IllegalArgumentException("No active prompt template for " + g.getSqlEngine()));
-        SqlDiagnostic original = diagnostics.findByGroupIdOrderByIdDesc(groupId).stream()
+    }
+
+    private SqlDiagnostic latestOriginal(Long groupId) {
+        return diagnostics.findByGroupIdOrderByIdDesc(groupId).stream()
                 .filter(d -> d.getPhase() == SqlDiagnostic.Phase.ORIGINAL && d.getStatus() == SqlDiagnostic.Status.CAPTURED)
                 .findFirst().orElse(null);
+    }
+
+    public OptimizationRun startOptimization(Long groupId, Long promptTemplateId) {
+        QueryGroup g = group(groupId);
+        PromptTemplate tpl = template(g, promptTemplateId);
+        SqlDiagnostic original = latestOriginal(groupId);
 
         OptimizationRun run = new OptimizationRun();
         run.setGroupId(groupId);

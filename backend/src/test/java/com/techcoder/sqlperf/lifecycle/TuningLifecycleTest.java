@@ -112,6 +112,12 @@ class TuningLifecycleTest {
         TrackerDto tr = trackers.createForGroups(List.of(g.getId())).getFirst();
         assertThat(tr.workflowStatus()).isEqualTo(WorkflowStatus.NEW);
 
+        // choosing a prompt template shows the rendered prompt at once, without starting a run
+        WorkflowService.PromptPreview preview = workflow.previewPrompt(g.getId(), null);
+        assertThat(preview.promptText()).contains("db.fact").doesNotContain("{{bad_sql}}");
+        assertThat(preview.missingInputs()).contains("ddl", "explain", "profile_summary");
+        assertThat(workflow.runs(g.getId())).isEmpty();
+
         // dropdown fields only take configured values
         assertThatThrownBy(() -> trackers.update(tr.trackerId(), update(tr, "Not a theme")))
                 .isInstanceOf(IllegalArgumentException.class);

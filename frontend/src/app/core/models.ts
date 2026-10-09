@@ -568,6 +568,16 @@ export interface TableDdl {
   capturedAt: string;
 }
 
+/** A prompt rendered for a group without starting a run. */
+export interface PromptPreview {
+  promptTemplateId: number;
+  templateName: string;
+  versionNo: number;
+  promptText: string;
+  /** template placeholders whose input is not captured yet, e.g. "ddl", "explain" */
+  missingInputs: string[];
+}
+
 export interface OptimizationRun {
   id: number;
   groupId: number;

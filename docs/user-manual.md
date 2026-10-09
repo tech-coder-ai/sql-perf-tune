@@ -371,7 +371,7 @@ Open a group (from Query Groups or *Diagnostics & AI agent* on a tracker item).
 |---|---|---|
 | **Diagnostics** | 4–6, 10 | Paste or attach the explain plan and Impala query profile for the **original** SQL; later do the same for each **optimized** iteration (pick the iteration). The profile is parsed automatically: run duration, execution and teardown times, Impala CPU, rows / tables scanned and peak memory. |
 | **DDL** | 8 | Add `SHOW CREATE TABLE` output and row counts for every table the SQL reads. |
-| **Optimization** | 7–9 | Choose a prompt template and press **Run optimization agent**. The full prompt is built from the SQL, DDL, explain, profile and execution summary. Run it in your approved AI tool and paste the answer back; it becomes a new iteration. |
+| **Optimization** | 7–9 | Choose a prompt template: the **prompt preview** shows the full prompt built from the SQL, DDL, explain, profile and execution summary, and warns about inputs not captured yet. Press **Run optimization agent** to record the run; its prompt stays open with a copy button and an answer box. Run it in your approved AI tool, paste the answer and click **Store response**: it becomes a new iteration. |
 | **Feedback** | 12 | Record whether an iteration was **adopted** or **rejected** (reason required for rejections) or add a comment. The tracker stage follows (§8.2). |
 
 ---

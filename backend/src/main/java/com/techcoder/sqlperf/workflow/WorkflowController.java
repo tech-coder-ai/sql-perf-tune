@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -55,6 +56,13 @@ public class WorkflowController {
     @GetMapping("/optimization-runs")
     public List<OptimizationRun> runs(@PathVariable Long groupId) {
         return service.runs(groupId);
+    }
+
+    /** The rendered prompt for a template (default: the active one) without starting a run. */
+    @GetMapping("/prompt-preview")
+    public WorkflowService.PromptPreview promptPreview(@PathVariable Long groupId,
+                                                       @RequestParam(required = false) Long promptTemplateId) {
+        return service.previewPrompt(groupId, promptTemplateId);
     }
 
     public record StartRunRequest(Long promptTemplateId) {

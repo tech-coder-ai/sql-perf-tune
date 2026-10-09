@@ -24,6 +24,7 @@ import {
   LoadHistoryEntry,
   OptimizationRun,
   Page,
+  PromptPreview,
   PromptTemplate,
   QueryGroup,
   QueryLog,
@@ -135,6 +136,11 @@ export class Api {
   }
   runs(groupId: number): Observable<OptimizationRun[]> {
     return this.http.get<OptimizationRun[]>(`/api/groups/${groupId}/optimization-runs`);
+  }
+  /** Rendered prompt for a template (default: the active one) without starting a run. */
+  promptPreview(groupId: number, promptTemplateId?: number | null): Observable<PromptPreview> {
+    const params: Record<string, string> = promptTemplateId ? { promptTemplateId: String(promptTemplateId) } : {};
+    return this.http.get<PromptPreview>(`/api/groups/${groupId}/prompt-preview`, { params });
   }
   startRun(groupId: number, promptTemplateId?: number): Observable<OptimizationRun> {
     return this.http.post<OptimizationRun>(`/api/groups/${groupId}/optimization-runs`, { promptTemplateId });
