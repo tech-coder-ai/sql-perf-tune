@@ -74,8 +74,13 @@ appear on Query groups and can be tracked. If the server restarts during an impo
 ### From a file (CSV or Excel)
 
 1. Drop a `.csv` or `.xlsx` file on the dialog (or click *browse*).
-2. Choose the SQL engine (Impala by default).
-3. Click **Import**.
+2. Click **Import**.
+
+A file does not say which engine ran its SQL, so the dialog assumes **Impala** (shown as *SQL engine:
+IMPALA*). Only if the file comes from another engine, click **change** and pick it: the engine is part of
+the pattern key (the same SQL on two engines is two patterns) and selects the prompt template. When
+importing from a **database**, the engine comes from the data source (Administration → Data sources) and is
+only shown, not chosen.
 
 The first row must be a header. Expected columns (case, spaces and underscores do not matter):
 
