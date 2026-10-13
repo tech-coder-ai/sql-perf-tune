@@ -4,6 +4,9 @@ spt:
     mode: JWT
   cors:
     allowed-origins: ${SPT_CORS_ORIGINS}
+  agent:
+    # prod uses the real LLM endpoint (SPT_LLM_ENDPOINT_URL, SPT_LLM_MODEL, SPT_LLM_AUTHORIZATION); no mock
+    mock-endpoint: false
 
 spring:
   security:

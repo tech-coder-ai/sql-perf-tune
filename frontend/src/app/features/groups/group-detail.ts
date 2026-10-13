@@ -252,7 +252,7 @@ export class GroupDetail implements OnInit {
         this.busy.set(false);
         this.snack.open(
           this.waitingForAgent(r)
-            ? `Prompt sent to ${r.modelName}; its answer becomes a new iteration`
+            ? 'Prompt sent to the optimization agent; its answer becomes a new iteration'
             : r.status === 'PENDING'
               ? 'Prompt prepared - run it in the LLM tool and paste the answer'
               : 'Agent run ' + r.status.toLowerCase(),
@@ -275,7 +275,7 @@ export class GroupDetail implements OnInit {
         if (done.length) {
           const r = done[0];
           this.snack.open(
-            r.status === 'COMPLETED' ? `${r.modelName} answered run #${r.id}: new iteration on the tracker` : `Run #${r.id} failed: ${r.errorMessage}`,
+            r.status === 'COMPLETED' ? `Run #${r.id} answered: new iteration on the tracker` : `Run #${r.id} failed: ${r.errorMessage}`,
             undefined,
             { duration: 5000 },
           );

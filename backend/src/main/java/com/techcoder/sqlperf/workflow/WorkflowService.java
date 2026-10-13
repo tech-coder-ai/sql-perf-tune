@@ -324,7 +324,8 @@ public class WorkflowService {
 
     private OptimizationAgent.Request agentRequest(QueryGroup g, OptimizationRun run) {
         int attempt = (int) runs.countByGroupIdAndIdLessThan(g.getId(), run.getId());
-        return new OptimizationAgent.Request(g.getId(), g.getSqlEngine(), g.getSampleQuery(), run.getPromptText(), attempt);
+        return new OptimizationAgent.Request(g.getId(), run.getId(), g.getSqlEngine(), g.getSampleQuery(),
+                run.getPromptText(), attempt);
     }
 
     /** Background part of a run: ask the agent (no transaction held), then store the answer as the requester. */

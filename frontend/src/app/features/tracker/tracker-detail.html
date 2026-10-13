@@ -332,13 +332,13 @@
             </p>
             <span class="spacer"></span>
             @if (agent()?.automatic) {
-              <button mat-flat-button class="nowrap" (click)="askAgent()" [disabled]="agentRunId() !== null" matTooltip="Send the prompt (active template) to the AI agent; its answer becomes the next iteration">
+              <button mat-flat-button class="nowrap" (click)="askAgent()" [disabled]="agentRunId() !== null" matTooltip="Send the prompt (active template) to the optimization agent; its answer becomes the next iteration">
                 @if (agentRunId() !== null) {
                   <mat-spinner diameter="18" class="btn-spinner" />
                 } @else {
                   <mat-icon>auto_awesome</mat-icon>
                 }
-                Ask {{ agent()!.modelName }}
+                Run optimization agent
               </button>
             }
             <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
@@ -347,7 +347,7 @@
             <div class="agent-wait" role="status">
               <mat-spinner diameter="22" />
               <span>
-                <b>Waiting for {{ agent()?.modelName }}…</b> Run #{{ runId }}: the prompt with the SQL, explain plan, profile and DDL was sent.
+                <b>Waiting for the optimization agent…</b> Run #{{ runId }}: the prompt with the SQL, explain plan, profile and DDL was sent.
                 Its rewrite appears below as the next iteration.
               </span>
             </div>
@@ -459,7 +459,7 @@
                   </td>
                 </tr>
               } @empty {
-                <tr><td colspan="12" class="muted">No iterations yet. Ask the AI agent above, or add one manually.</td></tr>
+                <tr><td colspan="12" class="muted">No iterations yet. Run the optimization agent above, or add one manually.</td></tr>
               }
             </table>
           </div>

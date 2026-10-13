@@ -83,16 +83,26 @@ public record SptProperties(
     /**
      * The optimization agent (LLM) of step 8.
      *
-     * @param mode            MOCK: simulated LLM answers (until the custom LLM endpoint is wired in);
+     * @param mode            HTTP: POST the prompt to {@code endpointUrl} and store the answer;
      *                        MANUAL: the analyst runs the prompt elsewhere and pastes the answer
-     * @param mockDelayMillis how long a simulated answer takes
+     * @param endpointUrl     the LLM endpoint; empty = this server's built-in mock ({@code /api/mock-llm/v1/optimize})
+     * @param model           model name recorded on each run and sent to the endpoint
+     * @param authorization   value of the Authorization header sent to the endpoint (e.g. "Bearer ..."); empty = none
+     * @param timeoutSeconds  how long to wait for an answer
+     * @param mockEndpoint    serve the built-in mock endpoint (development; off in prod)
+     * @param mockDelayMillis how long the mock takes to answer
      */
     public record Agent(
-            @DefaultValue("MOCK") AgentMode mode,
+            @DefaultValue("HTTP") AgentMode mode,
+            @DefaultValue("") String endpointUrl,
+            @DefaultValue("mock-llm") String model,
+            @DefaultValue("") String authorization,
+            @DefaultValue("180") int timeoutSeconds,
+            @DefaultValue("true") boolean mockEndpoint,
             @DefaultValue("5000") long mockDelayMillis) {
     }
 
-    public enum AgentMode { MOCK, MANUAL }
+    public enum AgentMode { HTTP, MANUAL }
 
     public record Cors(@DefaultValue("http://localhost:4200") List<String> allowedOrigins) {
     }

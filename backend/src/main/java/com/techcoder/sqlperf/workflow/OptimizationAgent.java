@@ -8,15 +8,14 @@ import java.util.Optional;
  *
  * <p>Which agent runs is set by {@code spt.agent.mode}:
  * <ul>
+ *   <li>{@code HTTP} ({@link HttpLlmOptimizationAgent}, default): POSTs the prompt to the LLM endpoint
+ *       ({@code spt.agent.endpoint-url}, contract in {@link LlmApi}); without a URL, to the built-in mock;</li>
  *   <li>{@code MANUAL} ({@link ManualOptimizationAgent}): no answer, the run stays PENDING so an analyst runs the
  *       rendered prompt in the approved LLM tool and pastes the answer back
- *       ({@code POST /api/groups/{id}/optimization-runs/{runId}/response});</li>
- *   <li>{@code MOCK} ({@link MockLlmOptimizationAgent}): a stand-in for the LLM endpoint that answers after a short
- *       delay with a plausible rewrite, different on every attempt.</li>
+ *       ({@code POST /api/groups/{id}/optimization-runs/{runId}/response}).</li>
  * </ul>
- * The custom LLM endpoint becomes a third implementation: POST the prompt, return the model's text. Automatic
- * agents are called in the background ({@link WorkflowService#startOptimization}), so a slow model never holds an
- * HTTP request or a database transaction.
+ * Automatic agents are called in the background ({@link WorkflowService#startOptimization}), so a slow model never
+ * holds an HTTP request or a database transaction.
  */
 public interface OptimizationAgent {
 
@@ -24,7 +23,7 @@ public interface OptimizationAgent {
      * @param badSql  the group's sample SQL (also inside the prompt)
      * @param attempt how many runs the group had before this one (0 = first)
      */
-    record Request(Long groupId, String sqlEngine, String badSql, String prompt, int attempt) {
+    record Request(Long groupId, Long runId, String sqlEngine, String badSql, String prompt, int attempt) {
     }
 
     String modelName();

@@ -282,24 +282,34 @@ tables and columns from the SQL and generates deterministic, Impala-formatted ou
 
 ### Optimization agent (LLM) and test runs
 
-`OptimizationAgent` is the port to the model (`spt.agent.mode`): `MOCK` → `MockLlmOptimizationAgent`,
-`MANUAL` → `ManualOptimizationAgent` (paste the answer). `WorkflowService.startOptimization` stores the run
-(prompt rendered from the template) as `PENDING` and, for an automatic agent, calls it **after commit** on the
-`agentExecutor` (`callAgent`): no transaction or HTTP request waits on the model. The answer is stored by
-`complete()` as the requesting user (`CurrentUser.runAs`) and becomes an `AI_AGENT` iteration; an exception
-marks the run `FAILED` with the reason. Runs left `PENDING` by a restart are asked again at startup.
-`GET /api/agent` tells the UI the model name and whether it answers by itself; the group page and the tracker's
-Iterations tab poll the runs every 2 s while one is pending.
+`OptimizationAgent` is the port to the model (`spt.agent.mode`): `HTTP` (default) →
+`HttpLlmOptimizationAgent`, `MANUAL` → `ManualOptimizationAgent` (paste the answer).
+`WorkflowService.startOptimization` stores the run (prompt rendered from the template) as `PENDING` and, for an
+automatic agent, calls it **after commit** on the `agentExecutor` (`callAgent`): no transaction or HTTP request
+waits on the model. The answer is stored by `complete()` as the requesting user (`CurrentUser.runAs`) and becomes
+an `AI_AGENT` iteration; an exception (HTTP error, timeout, no text) marks the run `FAILED` with the reason. Runs
+left `PENDING` by a restart are asked again at startup. `GET /api/agent` tells the UI whether the agent answers by
+itself; the group page and the tracker's Iterations tab poll the runs every 2 s while one is pending.
 
-**Connecting the custom LLM endpoint:** add an `OptimizationAgent` bean (e.g. `HttpLlmOptimizationAgent`) for a
-new `AgentMode` value: POST `Request.prompt()` (plus model / temperature settings) with a timeout, return the
-model's text. The answer must contain a ```` ```sql ```` block, ideally under `### CHANGE NARRATIVE` /
-`### OPTIMIZED SQL` as the prompt template asks (`AgentResponseParser`). Throw on HTTP errors so the run is
-marked `FAILED`. `Request.attempt()` (runs before this one for the group) can drive temperature or a "try a
-different approach" line.
+**The LLM endpoint contract** (`workflow/LlmApi.java`):
 
-The mock waits `spt.agent.mock-delay-millis`, then applies a different set of rewrites per attempt (broadcast
-hint, partition filter, `STRAIGHT_JOIN`, `NDV()`), formats the SQL and answers in the expected format.
+```
+POST {spt.agent.endpoint-url}          Content-Type: application/json   Authorization: {spt.agent.authorization}
+{ "model": "mock-llm",
+  "prompt": "You are a senior Cloudera Impala performance engineer ...",
+  "metadata": { "groupId": 2, "runId": 14, "sqlEngine": "IMPALA", "attempt": 1, "sql": "SELECT ..." } }
+-> 200 { "text": "### CHANGE NARRATIVE\n...\n### OPTIMIZED SQL\n```sql\nSELECT ...\n```", "model": "..." }
+```
+
+Only `prompt` is needed to answer; `metadata` is context. `text` must contain one ```` ```sql ```` block
+(`AgentResponseParser`). Any non-2xx status, a timeout (`spt.agent.timeout-seconds`) or no `text` fails the run.
+
+**Built-in mock:** with `spt.agent.endpoint-url` empty the agent calls this server's
+`POST /api/mock-llm/v1/optimize` (`MockLlmController`, same contract), which waits `spt.agent.mock-delay-millis`
+and answers with `MockLlm`: a different set of rewrites per attempt (broadcast hint, partition filter,
+`STRAIGHT_JOIN`, `NDV()`) in the expected format. **Switching to the real model is configuration only:** set
+`SPT_LLM_ENDPOINT_URL`, `SPT_LLM_MODEL` and, if needed, `SPT_LLM_AUTHORIZATION`; the `prod` profile turns the
+mock endpoint off (`spt.agent.mock-endpoint=false`).
 
 **Test runs** (`POST /api/tracker/{id}/iterations/{itId}/test`, `IterationTestService`): runs the iteration's
 SQL through `QueryMetadataClient` and stores the result as an `OPTIMIZED` diagnostic of that iteration, which
@@ -469,7 +479,12 @@ All grid setup lives in `src/app/shared/grid.ts`:
 | `spt.diagnostics.client` | `MOCK` | generated Impala-shaped diagnostics until the Impala client exists |
 | `spt.diagnostics.mock-delay-millis` | `4000` | |
 | `spt.diagnostics.threads` | `2` | captures running at the same time |
-| `spt.agent.mode` | `MOCK` | `MOCK` = simulated LLM answers; `MANUAL` = paste the answer |
+| `spt.agent.mode` | `HTTP` (`SPT_LLM_MODE`) | `HTTP` = call the LLM endpoint; `MANUAL` = paste the answer |
+| `spt.agent.endpoint-url` | empty (`SPT_LLM_ENDPOINT_URL`) | LLM endpoint; empty = built-in mock |
+| `spt.agent.model` | `mock-llm` (`SPT_LLM_MODEL`) | recorded on each run, sent to the endpoint |
+| `spt.agent.authorization` | empty (`SPT_LLM_AUTHORIZATION`) | `Authorization` header value |
+| `spt.agent.timeout-seconds` | `180` | |
+| `spt.agent.mock-endpoint` | `true` (`false` in prod) | serve `/api/mock-llm/v1/optimize` |
 | `spt.agent.mock-delay-millis` | `5000` | |
 
 Oracle profile variables: `SPT_DB_URL`, `SPT_DB_USER`, `SPT_DB_PASSWORD`, `SPT_DB_SCHEMA`, `SPT_DB_POOL_SIZE`.
@@ -493,7 +508,8 @@ identical-file re-load, overlapping files and in-file duplicates. Add a case the
 `TuningLifecycleTest` covers request → diagnostics → iterations → select → reject → adopt, every insight
 endpoint, and recovery of rows left ungrouped by an interrupted import (it runs with
 `spt.diagnostics.auto-capture=false` so the background capture does not race its manual captures).
-`DiagnosticsCaptureTest` covers the automatic capture; `MockLlmFlowTest` three agent answers → test runs → best;
+`DiagnosticsCaptureTest` covers the automatic capture; `MockLlmFlowTest` three agent answers over real HTTP from
+the mock endpoint → test runs → best;
 `LogDrillDownTest` the dashboard links and row grouping. `TuningLifecycleTest` uses `spt.agent.mode=MANUAL`.
 
 ---

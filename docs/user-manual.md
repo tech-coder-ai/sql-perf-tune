@@ -365,10 +365,10 @@ are shown in red.
 Tuning usually takes several attempts. Each attempt is an **iteration** (`#1`, `#2`, …), created either by
 the AI agent or manually (**New iteration**: paste the rewritten SQL and what changed).
 
-**Ask the AI agent** (Iterations tab, or *Ask …* on the group page's Optimization tab) sends the prompt (the
-SQL with its explain plan, profile and table DDL) to the AI model. A *Waiting for …* bar shows while it works;
-its answer (what it changed and the rewritten SQL) becomes the next iteration. Ask again for another variant:
-every answer is kept as its own iteration so they can be compared.
+**Run optimization agent** (Iterations tab, or the group page's Optimization tab) sends the prompt (the SQL
+with its explain plan, profile and table DDL) to the AI model. *Waiting for the optimization agent…* shows
+while it works; its answer (what it changed and the rewritten SQL) becomes the next iteration. Run it again for
+another variant: every answer is kept as its own iteration so they can be compared.
 
 1. **Test** an iteration: the flask icon on its row runs the SQL on Impala and records run time, execution,
    teardown, CPU, rows / tables scanned, memory and whether it returns the same number of rows as the
@@ -385,8 +385,8 @@ every answer is kept as its own iteration so they can be compared.
      goes back to **Tuning** so another iteration can be tried.
    - *Rejected* without an iteration: the whole item is closed as Rejected.
 
-*Current build:* the AI model is **simulated** (`mock-llm`) until the company LLM endpoint is connected. It
-answers after a few seconds with a plausible Impala rewrite of the SQL, and each request tries a different
+*Current build:* the AI model is **simulated** (the run shows model `mock-llm`) until the company LLM endpoint is
+connected; the screens stay the same when it is. It answers after a few seconds with a plausible Impala rewrite of the SQL, and each request tries a different
 combination (broadcast join hint, partition filter on `load_month`, fixed join order, `NDV()` for
 `COUNT(DISTINCT …)`), so successive iterations differ slightly. Test runs are simulated too: the more of these
 rewrites an iteration has, the faster it "runs". The answers say *Simulated answer*; do not adopt them.
@@ -462,7 +462,7 @@ Open a group (from Query Groups or *Diagnostics & AI agent* on a tracker item).
 |---|---|---|
 | **Diagnostics** | 4–6, 10 | Paste or attach the explain plan and Impala query profile for the **original** SQL; later do the same for each **optimized** iteration (pick the iteration). The profile is parsed automatically: run duration, execution and teardown times, Impala CPU, rows / tables scanned and peak memory. |
 | **DDL** | 8 | Add `SHOW CREATE TABLE` output and row counts for every table the SQL reads. |
-| **Optimization** | 7–9 | Choose a prompt template: the **prompt preview** shows the full prompt built from the SQL, DDL, explain, profile and execution summary, and warns about inputs not captured yet. Press **Ask \<model\>** to send it to the AI model: the run shows *Waiting for …* until the answer arrives and becomes a new iteration (the page updates by itself). When the application is set to the manual agent the button reads **Run optimization agent**: the prompt stays open with a copy button and an answer box; run it in your approved AI tool, paste the answer and click **Store response**. |
+| **Optimization** | 7–9 | Choose a prompt template: the **prompt preview** shows the full prompt built from the SQL, DDL, explain, profile and execution summary, and warns about inputs not captured yet. Press **Run optimization agent** to send it to the AI model: the run shows *Waiting for the optimization agent…* until the answer arrives and becomes a new iteration (the page updates by itself). If the application is set to manual mode, the prompt stays open with a copy button and an answer box instead: run it in your approved AI tool, paste the answer and click **Store response**. |
 | **Feedback** | 12 | Record whether an iteration was **adopted** or **rejected** (reason required for rejections) or add a comment. The tracker stage follows (§8.2). |
 
 ---

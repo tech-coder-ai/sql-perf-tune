@@ -71,9 +71,15 @@ spt:
     mock-delay-millis: 4000
     threads: 2
   agent:
-    # MOCK = simulated LLM answers (a different rewrite per attempt) until the custom LLM endpoint is wired in;
-    # MANUAL = run the prompt in the approved LLM tool and paste the answer
-    mode: MOCK
+    # HTTP = send the prompt to the LLM endpoint below; MANUAL = run the prompt elsewhere and paste the answer
+    mode: ${SPT_LLM_MODE:HTTP}
+    # the LLM endpoint (contract: workflow/LlmApi.java); empty = this server's built-in mock /api/mock-llm/v1/optimize
+    endpoint-url: ${SPT_LLM_ENDPOINT_URL:}
+    model: ${SPT_LLM_MODEL:mock-llm}
+    # Authorization header for the endpoint, e.g. "Bearer <token>"; never commit it
+    authorization: ${SPT_LLM_AUTHORIZATION:}
+    timeout-seconds: 180
+    mock-endpoint: true
     mock-delay-millis: 5000
   cors:
     allowed-origins: http://localhost:4200

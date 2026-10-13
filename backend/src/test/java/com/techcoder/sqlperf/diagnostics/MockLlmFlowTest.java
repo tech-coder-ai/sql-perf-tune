@@ -24,9 +24,12 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-/** Track → automatic diagnostics → three simulated LLM answers (different rewrites) → test runs → best. */
-@SpringBootTest(properties = {"spt.diagnostics.mock-delay-millis=100", "spt.agent.mode=MOCK",
-        "spt.agent.mock-delay-millis=200"})
+/**
+ * Track → automatic diagnostics → three LLM answers (different rewrites) → test runs → best. The agent calls the
+ * built-in mock endpoint over real HTTP, exactly as it would call the real LLM endpoint.
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "spt.diagnostics.mock-delay-millis=100", "spt.agent.mode=HTTP", "spt.agent.mock-delay-millis=200"})
 class MockLlmFlowTest {
 
     @TempDir

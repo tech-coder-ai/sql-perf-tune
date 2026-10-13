@@ -4,29 +4,26 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.techcoder.sqlperf.config.SptProperties;
 import com.techcoder.sqlperf.diagnostics.MockImpalaMetadataClient;
 import com.techcoder.sqlperf.fingerprint.SqlPrettyPrinter;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * {@code spt.agent.mode=MOCK}: stands in for the LLM endpoint so the whole loop (prompt → answer → iteration →
- * test → best → adoption) can be shown before the real model is connected.
+ * The answers of the built-in mock LLM endpoint ({@link MockLlmController}), which stands in for the real LLM
+ * endpoint so the whole loop (prompt → answer → iteration → test → best → adoption) works before the real model
+ * is connected. The app calls it over HTTP exactly like the real endpoint.
  *
- * <p>It waits like a model would, then answers in the format the prompt asks for (change narrative + one SQL
- * block). Each attempt for a group applies a different set of typical Impala rewrites to the bad SQL, so
+ * <p>It answers in the format the prompt asks for (change narrative + one SQL block). Each attempt for a group
+ * applies a different set of typical Impala rewrites to the bad SQL, so
  * successive iterations differ slightly: a broadcast hint on the small side of a join, partition pruning on the
  * date filter, a fixed join order, NDV() for COUNT(DISTINCT). Rewrites that do not apply to the SQL are skipped.
  * The SQL is not guaranteed to be correct; it only exercises the workflow.
  */
 @Component
-@ConditionalOnProperty(prefix = "spt.agent", name = "mode", havingValue = "MOCK", matchIfMissing = true)
-public class MockLlmOptimizationAgent implements OptimizationAgent {
+public class MockLlm {
 
     enum Rewrite { BROADCAST_FIRST, BROADCAST_ALL, PARTITION, STRAIGHT_JOIN, NDV }
 
@@ -44,28 +41,29 @@ public class MockLlmOptimizationAgent implements OptimizationAgent {
     private static final Pattern WHERE = Pattern.compile("(?i)\\bWHERE\\s+");
     private static final Pattern TAIL = Pattern.compile("(?i)\\b(GROUP\\s+BY|ORDER\\s+BY|HAVING|LIMIT)\\b");
 
-    private final long delayMillis;
+    /** The "## Bad SQL" section of the default prompt template (used when the caller sends no SQL). */
+    private static final Pattern PROMPT_SQL = Pattern.compile("(?s)##\\s*Bad SQL\\s*\\n(.*?)(?:\\n\\s*##|\\z)");
+
     private final SqlPrettyPrinter pretty;
 
-    public MockLlmOptimizationAgent(SptProperties props, SqlPrettyPrinter pretty) {
-        this.delayMillis = props.agent().mockDelayMillis();
+    public MockLlm(SqlPrettyPrinter pretty) {
         this.pretty = pretty;
     }
 
-    @Override
-    public String modelName() {
-        return "mock-llm";
-    }
-
-    @Override
-    public Optional<String> optimize(Request r) throws InterruptedException {
-        if (delayMillis > 0) {
-            Thread.sleep(delayMillis);
+    /**
+     * @param badSql  the SQL to rewrite; null = taken from the prompt
+     * @param attempt how many answers the group had before (picks the rewrites)
+     */
+    public String answer(String prompt, String badSql, int attempt) {
+        String sql = badSql;
+        if (sql == null && prompt != null) {
+            Matcher m = PROMPT_SQL.matcher(prompt);
+            sql = m.find() ? m.group(1) : "";
         }
-        String sql = r.badSql() == null ? "" : r.badSql().strip();
+        sql = sql == null ? "" : sql.strip();
         List<String> notes = new ArrayList<>();
         int expected = 0;
-        for (Rewrite w : PLAN.get(r.attempt() % PLAN.size())) {
+        for (Rewrite w : PLAN.get(attempt % PLAN.size())) {
             String next = apply(w, sql);
             if (!next.equals(sql)) {
                 sql = next;
@@ -87,10 +85,11 @@ public class MockLlmOptimizationAgent implements OptimizationAgent {
         }
         answer.append("\nExpected impact: about ").append(Math.max(5, pct))
                 .append("% less run time; the result set is unchanged. (Simulated answer, attempt ")
-                .append(r.attempt() + 1).append(".)\n\n### OPTIMIZED SQL\n```sql\n")
+                .append(attempt + 1).append(".)\n\n### OPTIMIZED SQL\n```sql\n")
                 .append(pretty.format(sql)).append("\n```\n");
-        return Optional.of(answer.toString());
+        return answer.toString();
     }
+
 
     static String apply(Rewrite w, String sql) {
         return switch (w) {

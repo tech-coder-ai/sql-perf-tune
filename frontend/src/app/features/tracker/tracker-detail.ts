@@ -259,11 +259,11 @@ export class TrackerDetail implements OnInit {
           ? 'Triage while the explain plan, profile and DDL are fetched: set priority, theme and owners on the Tracking tab.'
           : 'Analyse the SQL: set a theme and capture the explain plan / profile of the original run on the group page.';
       case 'DIAGNOSTICS_CAPTURED':
-        return 'Review the diagnostics, then ask the AI agent for a rewrite (Iterations tab) or add a manual iteration with the rewritten SQL.';
+        return 'Review the diagnostics, then run the optimization agent (Iterations tab) or add a manual iteration with the rewritten SQL.';
       case 'OPTIMIZATION_REQUESTED':
         return 'Waiting for a candidate SQL from the AI agent (or paste its answer / add a manual iteration).';
       case 'OPTIMIZED':
-        return 'Test the candidate iteration(s): run the test (flask icon on the Iterations tab), or capture the post-run profile / enter the results by hand. Ask the agent again for more variants.';
+        return 'Test the candidate iteration(s): run the test (flask icon on the Iterations tab), or capture the post-run profile / enter the results by hand. Run the agent again for more variants.';
       case 'POST_RUN_VALIDATED':
         return best
           ? `Iteration #${best.iterationNo} is the best so far (${best.durationImprovementPct ?? '—'}% faster). Select it for adoption.`
@@ -449,7 +449,7 @@ export class TrackerDetail implements OnInit {
         this.agentRunId.set(null);
         this.load();
         this.snack.open(
-          run?.status === 'COMPLETED' ? `${run.modelName} proposed a new iteration: test it to compare` : `The agent failed: ${run?.errorMessage ?? 'no answer'}`,
+          run?.status === 'COMPLETED' ? 'The optimization agent proposed a new iteration: test it to compare' : `The agent failed: ${run?.errorMessage ?? 'no answer'}`,
           undefined,
           { duration: 5000 },
         );
