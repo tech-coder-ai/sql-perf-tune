@@ -20,6 +20,7 @@
     <a mat-stroked-button routerLink="/insights"><mat-icon>insights</mat-icon> All insights</a>
   </div>
 
+  <app-loading [loading]="loading()" [empty]="!daily()" [label]="'Loading ' + date() + '…'">
   @if (daily(); as d) {
     @if (movedFrom(); as was) {
       <div class="notice" role="status">
@@ -195,4 +196,5 @@
       </app-chart-card>
     </div>
   }
+  </app-loading>
 </div>

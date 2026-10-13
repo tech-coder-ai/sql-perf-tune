@@ -70,6 +70,11 @@ spt:
     client: MOCK
     mock-delay-millis: 4000
     threads: 2
+  agent:
+    # MOCK = simulated LLM answers (a different rewrite per attempt) until the custom LLM endpoint is wired in;
+    # MANUAL = run the prompt in the approved LLM tool and paste the answer
+    mode: MOCK
+    mock-delay-millis: 5000
   cors:
     allowed-origins: http://localhost:4200
   ui:

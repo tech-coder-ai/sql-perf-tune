@@ -33,6 +33,7 @@ import {
   TableDdl,
   Tracker,
   Bucket,
+  AgentInfo,
 } from './models';
 
 export type Params = Record<string, string | number | boolean | readonly string[] | null | undefined>;
@@ -182,6 +183,13 @@ export class Api {
   }
   addIteration(trackerId: number, body: object): Observable<Iteration> {
     return this.http.post<Iteration>(`/api/tracker/${trackerId}/iterations`, body);
+  }
+  /** Runs the iteration's SQL on the engine and records the test; returns the item's iterations. */
+  testIteration(trackerId: number, id: number): Observable<Iteration[]> {
+    return this.http.post<Iteration[]>(`/api/tracker/${trackerId}/iterations/${id}/test`, null);
+  }
+  agent(): Observable<AgentInfo> {
+    return this.http.get<AgentInfo>('/api/agent');
   }
   updateIteration(trackerId: number, id: number, body: object): Observable<Iteration> {
     return this.http.put<Iteration>(`/api/tracker/${trackerId}/iterations/${id}`, body);

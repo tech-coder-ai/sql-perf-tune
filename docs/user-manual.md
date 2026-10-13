@@ -232,6 +232,10 @@ adoption → Pipeline board, savings → Insights.
 
 Every chart has a **table view** (the switch at the top right of the card) with the exact values.
 
+While the numbers load, a spinner shows on the first visit and a progress bar runs over the previous day's
+figures (dimmed) when you change the day, so old numbers are never mistaken for the new ones. Insights works
+the same way when you change the day, period or windows.
+
 ---
 
 ## 6. Insights: the 15 questions
@@ -359,12 +363,17 @@ are shown in red.
 ### 8.2 Tuning iterations
 
 Tuning usually takes several attempts. Each attempt is an **iteration** (`#1`, `#2`, …), created either by
-the AI agent (its answer is pasted on the group page) or manually (**New iteration**: paste the rewritten
-SQL and what changed).
+the AI agent or manually (**New iteration**: paste the rewritten SQL and what changed).
 
-1. **Test** an iteration: on the group page, capture the post-run profile for the *Optimized* phase and pick
-   the iteration it belongs to; or press the pencil on the iteration and enter the results (run time,
-   execution, teardown, CPU, rows / tables scanned, memory, whether the results match the original).
+**Ask the AI agent** (Iterations tab, or *Ask …* on the group page's Optimization tab) sends the prompt (the
+SQL with its explain plan, profile and table DDL) to the AI model. A *Waiting for …* bar shows while it works;
+its answer (what it changed and the rewritten SQL) becomes the next iteration. Ask again for another variant:
+every answer is kept as its own iteration so they can be compared.
+
+1. **Test** an iteration: the flask icon on its row runs the SQL on Impala and records run time, execution,
+   teardown, CPU, rows / tables scanned, memory and whether it returns the same number of rows as the
+   original (a spinner shows on the row meanwhile). Or capture the post-run profile on the group page
+   (*Optimized* phase, pick the iteration), or press the pencil and enter the results by hand.
 2. The **★ best** iteration is the fastest tested iteration whose results match the original (CPU breaks
    ties). The iterations table shows each iteration's gain against the original.
 3. **Select** an iteration for adoption (usually the best). Its SQL and results are copied to the tracker
@@ -375,6 +384,12 @@ SQL and what changed).
    - *Rejected* with an iteration: that iteration is marked rejected (e.g. *Inaccurate results*) and the item
      goes back to **Tuning** so another iteration can be tried.
    - *Rejected* without an iteration: the whole item is closed as Rejected.
+
+*Current build:* the AI model is **simulated** (`mock-llm`) until the company LLM endpoint is connected. It
+answers after a few seconds with a plausible Impala rewrite of the SQL, and each request tries a different
+combination (broadcast join hint, partition filter on `load_month`, fixed join order, `NDV()` for
+`COUNT(DISTINCT …)`), so successive iterations differ slightly. Test runs are simulated too: the more of these
+rewrites an iteration has, the faster it "runs". The answers say *Simulated answer*; do not adopt them.
 
 ### 8.3 Tracking fields
 
@@ -447,7 +462,7 @@ Open a group (from Query Groups or *Diagnostics & AI agent* on a tracker item).
 |---|---|---|
 | **Diagnostics** | 4–6, 10 | Paste or attach the explain plan and Impala query profile for the **original** SQL; later do the same for each **optimized** iteration (pick the iteration). The profile is parsed automatically: run duration, execution and teardown times, Impala CPU, rows / tables scanned and peak memory. |
 | **DDL** | 8 | Add `SHOW CREATE TABLE` output and row counts for every table the SQL reads. |
-| **Optimization** | 7–9 | Choose a prompt template: the **prompt preview** shows the full prompt built from the SQL, DDL, explain, profile and execution summary, and warns about inputs not captured yet. Press **Run optimization agent** to record the run; its prompt stays open with a copy button and an answer box. Run it in your approved AI tool, paste the answer and click **Store response**: it becomes a new iteration. |
+| **Optimization** | 7–9 | Choose a prompt template: the **prompt preview** shows the full prompt built from the SQL, DDL, explain, profile and execution summary, and warns about inputs not captured yet. Press **Ask \<model\>** to send it to the AI model: the run shows *Waiting for …* until the answer arrives and becomes a new iteration (the page updates by itself). When the application is set to the manual agent the button reads **Run optimization agent**: the prompt stays open with a copy button and an answer box; run it in your approved AI tool, paste the answer and click **Store response**. |
 | **Feedback** | 12 | Record whether an iteration was **adopted** or **rejected** (reason required for rejections) or add a comment. The tracker stage follows (§8.2). |
 
 ---

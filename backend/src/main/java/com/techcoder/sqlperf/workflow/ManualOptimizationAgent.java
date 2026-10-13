@@ -4,7 +4,7 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Component;
 
-/** Fallback used when no other {@link OptimizationAgent} bean is registered. */
+/** {@code spt.agent.mode=MANUAL}: the analyst pastes the LLM answer (also the fallback without another agent). */
 @Component
 public class ManualOptimizationAgent implements OptimizationAgent {
 
@@ -14,7 +14,12 @@ public class ManualOptimizationAgent implements OptimizationAgent {
     }
 
     @Override
-    public Optional<String> optimize(String prompt) {
+    public boolean automatic() {
+        return false;
+    }
+
+    @Override
+    public Optional<String> optimize(Request request) {
         return Optional.empty();
     }
 }

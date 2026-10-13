@@ -331,8 +331,27 @@
               Select it for adoption; if users reject it, try the next iteration.
             </p>
             <span class="spacer"></span>
+            @if (agent()?.automatic) {
+              <button mat-flat-button class="nowrap" (click)="askAgent()" [disabled]="agentRunId() !== null" matTooltip="Send the prompt (active template) to the AI agent; its answer becomes the next iteration">
+                @if (agentRunId() !== null) {
+                  <mat-spinner diameter="18" class="btn-spinner" />
+                } @else {
+                  <mat-icon>auto_awesome</mat-icon>
+                }
+                Ask {{ agent()!.modelName }}
+              </button>
+            }
             <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
           </div>
+          @if (agentRunId(); as runId) {
+            <div class="agent-wait" role="status">
+              <mat-spinner diameter="22" />
+              <span>
+                <b>Waiting for {{ agent()?.modelName }}…</b> Run #{{ runId }}: the prompt with the SQL, explain plan, profile and DDL was sent.
+                Its rewrite appears below as the next iteration.
+              </span>
+            </div>
+          }
 
           @if (newIteration) {
             <div class="card new-iter">
@@ -423,6 +442,13 @@
                   <td class="small">{{ i.testedAt | ts }}</td>
                   <td class="row-actions">
                     <button mat-icon-button (click)="compareWith(i)" [disabled]="!i.optimizedSql" matTooltip="Compare with the original SQL" aria-label="Compare with the original SQL"><mat-icon>difference</mat-icon></button>
+                    @if (i.optimizedSql && (i.status === 'PROPOSED' || i.status === 'TESTED' || i.status === 'FAILED')) {
+                      @if (testing() === i.id) {
+                        <span class="row-spinner" matTooltip="Running on Impala…"><mat-spinner diameter="20" /></span>
+                      } @else {
+                        <button mat-icon-button (click)="runTest(i)" [disabled]="testing() !== null" matTooltip="Run it on Impala and record the test result" aria-label="Run test"><mat-icon>science</mat-icon></button>
+                      }
+                    }
                     <button mat-icon-button (click)="edit(i)" matTooltip="Open / enter test results" aria-label="Edit iteration"><mat-icon>edit</mat-icon></button>
                     @if (i.status === 'TESTED' || i.status === 'PROPOSED') {
                       <button mat-icon-button (click)="select(i)" matTooltip="Select for adoption" aria-label="Select for adoption"><mat-icon>how_to_reg</mat-icon></button>
@@ -433,7 +459,7 @@
                   </td>
                 </tr>
               } @empty {
-                <tr><td colspan="12" class="muted">No iterations yet. Run the AI agent on the group page or add one manually.</td></tr>
+                <tr><td colspan="12" class="muted">No iterations yet. Ask the AI agent above, or add one manually.</td></tr>
               }
             </table>
           </div>

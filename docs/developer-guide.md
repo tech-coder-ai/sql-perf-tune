@@ -280,6 +280,34 @@ the Cloudera Manager API, and `SHOW CREATE TABLE` / `SHOW TABLE STATS` per table
 tables and columns from the SQL and generates deterministic, Impala-formatted output (it waits
 `spt.diagnostics.mock-delay-millis` so the in-progress state is visible).
 
+### Optimization agent (LLM) and test runs
+
+`OptimizationAgent` is the port to the model (`spt.agent.mode`): `MOCK` → `MockLlmOptimizationAgent`,
+`MANUAL` → `ManualOptimizationAgent` (paste the answer). `WorkflowService.startOptimization` stores the run
+(prompt rendered from the template) as `PENDING` and, for an automatic agent, calls it **after commit** on the
+`agentExecutor` (`callAgent`): no transaction or HTTP request waits on the model. The answer is stored by
+`complete()` as the requesting user (`CurrentUser.runAs`) and becomes an `AI_AGENT` iteration; an exception
+marks the run `FAILED` with the reason. Runs left `PENDING` by a restart are asked again at startup.
+`GET /api/agent` tells the UI the model name and whether it answers by itself; the group page and the tracker's
+Iterations tab poll the runs every 2 s while one is pending.
+
+**Connecting the custom LLM endpoint:** add an `OptimizationAgent` bean (e.g. `HttpLlmOptimizationAgent`) for a
+new `AgentMode` value: POST `Request.prompt()` (plus model / temperature settings) with a timeout, return the
+model's text. The answer must contain a ```` ```sql ```` block, ideally under `### CHANGE NARRATIVE` /
+`### OPTIMIZED SQL` as the prompt template asks (`AgentResponseParser`). Throw on HTTP errors so the run is
+marked `FAILED`. `Request.attempt()` (runs before this one for the group) can drive temperature or a "try a
+different approach" line.
+
+The mock waits `spt.agent.mock-delay-millis`, then applies a different set of rewrites per attempt (broadcast
+hint, partition filter, `STRAIGHT_JOIN`, `NDV()`), formats the SQL and answers in the expected format.
+
+**Test runs** (`POST /api/tracker/{id}/iterations/{itId}/test`, `IterationTestService`): runs the iteration's
+SQL through `QueryMetadataClient` and stores the result as an `OPTIMIZED` diagnostic of that iteration, which
+fills its test results and the best-iteration choice. The mock client simulates a run that is faster the more
+of the mock rewrites the SQL contains (with a small per-SQL deviation) and returns the original's row count
+(`Request.originalRowCount`, a hint only a simulation uses). It runs synchronously; with the real engine
+(minutes per query) make it a background job with a status, like the diagnostics capture.
+
 ### Iterations (`SPT_TUNING_ITERATION`, package `iteration/`)
 
 ```
@@ -441,6 +469,8 @@ All grid setup lives in `src/app/shared/grid.ts`:
 | `spt.diagnostics.client` | `MOCK` | generated Impala-shaped diagnostics until the Impala client exists |
 | `spt.diagnostics.mock-delay-millis` | `4000` | |
 | `spt.diagnostics.threads` | `2` | captures running at the same time |
+| `spt.agent.mode` | `MOCK` | `MOCK` = simulated LLM answers; `MANUAL` = paste the answer |
+| `spt.agent.mock-delay-millis` | `5000` | |
 
 Oracle profile variables: `SPT_DB_URL`, `SPT_DB_USER`, `SPT_DB_PASSWORD`, `SPT_DB_SCHEMA`, `SPT_DB_POOL_SIZE`.
 Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
@@ -450,7 +480,7 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 ## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 25 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, drill-down on SQLite
+cd backend && mvn test                     # 26 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, mock LLM, drill-down on SQLite
 # the same import round-trip test against a real Oracle (container above):
 SPT_TEST_ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 SPT_TEST_ORACLE_USER=SPT_APP \
   SPT_TEST_ORACLE_PASSWORD=<app-pwd> mvn test -Dtest=ImportRoundTripOracleIT
@@ -463,7 +493,8 @@ identical-file re-load, overlapping files and in-file duplicates. Add a case the
 `TuningLifecycleTest` covers request → diagnostics → iterations → select → reject → adopt, every insight
 endpoint, and recovery of rows left ungrouped by an interrupted import (it runs with
 `spt.diagnostics.auto-capture=false` so the background capture does not race its manual captures).
-`DiagnosticsCaptureTest` covers the automatic capture; `LogDrillDownTest` the dashboard links and row grouping.
+`DiagnosticsCaptureTest` covers the automatic capture; `MockLlmFlowTest` three agent answers → test runs → best;
+`LogDrillDownTest` the dashboard links and row grouping. `TuningLifecycleTest` uses `spt.agent.mode=MANUAL`.
 
 ---
 

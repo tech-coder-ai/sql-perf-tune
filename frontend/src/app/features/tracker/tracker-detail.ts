@@ -10,11 +10,13 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { Api } from '../../core/api';
 import { LookupStore } from '../../core/lookups';
 import {
+  AgentInfo,
   AuditEvent,
   CustomField,
   Iteration,
@@ -105,6 +107,7 @@ const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
     MatButtonModule,
     MatIconModule,
     MatTooltipModule,
+    MatProgressSpinnerModule,
     SqlBlock,
     SqlDiff,
     CaptureStatusBanner,
@@ -160,6 +163,14 @@ export class TrackerDetail implements OnInit {
     return s === 'PENDING' || s === 'RUNNING';
   });
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** the optimization agent; an automatic one (LLM endpoint / mock) can be asked from here */
+  protected readonly agent = signal<AgentInfo | null>(null);
+  /** run the agent is answering (a new iteration appears when it does) */
+  protected readonly agentRunId = signal<number | null>(null);
+  /** iteration whose test run is in progress */
+  protected readonly testing = signal<number | null>(null);
+  private agentTimer: ReturnType<typeof setTimeout> | null = null;
   protected readonly saving = signal(false);
   protected readonly TAB = TAB;
   protected readonly tab = signal<number>(TAB.tracking);
@@ -248,11 +259,11 @@ export class TrackerDetail implements OnInit {
           ? 'Triage while the explain plan, profile and DDL are fetched: set priority, theme and owners on the Tracking tab.'
           : 'Analyse the SQL: set a theme and capture the explain plan / profile of the original run on the group page.';
       case 'DIAGNOSTICS_CAPTURED':
-        return 'Review the diagnostics, then run the optimization agent on the group page or add a manual iteration with the rewritten SQL.';
+        return 'Review the diagnostics, then ask the AI agent for a rewrite (Iterations tab) or add a manual iteration with the rewritten SQL.';
       case 'OPTIMIZATION_REQUESTED':
-        return 'Waiting for a candidate SQL: paste the agent answer or add a manual iteration.';
+        return 'Waiting for a candidate SQL from the AI agent (or paste its answer / add a manual iteration).';
       case 'OPTIMIZED':
-        return 'Test the candidate iteration(s): capture the post-run profile or enter the test results.';
+        return 'Test the candidate iteration(s): run the test (flask icon on the Iterations tab), or capture the post-run profile / enter the results by hand. Ask the agent again for more variants.';
       case 'POST_RUN_VALIDATED':
         return best
           ? `Iteration #${best.iterationNo} is the best so far (${best.durationImprovementPct ?? '—'}% faster). Select it for adoption.`
@@ -271,7 +282,11 @@ export class TrackerDetail implements OnInit {
   ngOnInit(): void {
     this.load();
     this.api.customFields('TRACKER').subscribe((f) => this.customFields.set(f.filter((x) => x.active)));
-    this.destroyRef.onDestroy(() => this.stopPolling());
+    this.destroyRef.onDestroy(() => {
+      this.stopPolling();
+      if (this.agentTimer) clearTimeout(this.agentTimer);
+    });
+    this.api.agent().subscribe((a) => this.agent.set(a));
   }
 
   load(): void {
@@ -404,6 +419,63 @@ export class TrackerDetail implements OnInit {
 
   set(m: Tracker, field: keyof Tracker, v: string | null): void {
     (m as unknown as Record<string, unknown>)[field] = v;
+  }
+
+  // ------------------------------------------------------------------ AI agent and test runs
+
+  /** Sends the group's prompt (active template) to the agent; its answer becomes the next iteration. */
+  askAgent(): void {
+    const t = this.saved();
+    if (!t) return;
+    this.tab.set(TAB.iterations);
+    this.api.startRun(t.groupId).subscribe((run) => {
+      if (run.status !== 'PENDING') {
+        this.load();
+        return;
+      }
+      this.agentRunId.set(run.id);
+      this.waitForAgent(t.groupId, run.id);
+    });
+  }
+
+  private waitForAgent(groupId: number, runId: number): void {
+    this.agentTimer = setTimeout(() => {
+      this.api.runs(groupId).subscribe((runs) => {
+        const run = runs.find((r) => r.id === runId);
+        if (run?.status === 'PENDING') {
+          this.waitForAgent(groupId, runId);
+          return;
+        }
+        this.agentRunId.set(null);
+        this.load();
+        this.snack.open(
+          run?.status === 'COMPLETED' ? `${run.modelName} proposed a new iteration: test it to compare` : `The agent failed: ${run?.errorMessage ?? 'no answer'}`,
+          undefined,
+          { duration: 5000 },
+        );
+      });
+    }, 2000);
+  }
+
+  /** Runs the iteration's SQL on the engine (mock Impala for now) and records run time, CPU, rows and the result check. */
+  runTest(i: Iteration): void {
+    const t = this.saved();
+    if (!t || this.testing()) return;
+    this.testing.set(i.id);
+    this.api.testIteration(t.trackerId, i.id).subscribe({
+      next: (its) => {
+        this.testing.set(null);
+        this.iterations.set(its);
+        this.load();
+        const r = its.find((x) => x.id === i.id);
+        if (r) {
+          const gain = r.durationImprovementPct === null ? '' : ` (${r.durationImprovementPct}% faster)`;
+          const check = r.resultMatches === false ? ' · results differ from the original' : ' · results match';
+          this.snack.open(`Iteration #${r.iterationNo}: ${minutesText(r.runDurationMinutes)}${gain}${check}`, undefined, { duration: 5000 });
+        }
+      },
+      error: () => this.testing.set(null),
+    });
   }
 
   // ------------------------------------------------------------------ iterations

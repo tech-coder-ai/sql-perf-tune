@@ -59,7 +59,7 @@
       }
     </aside>
 
-    <div class="content">
+    <app-loading class="content" [loading]="loading()" [empty]="!daily()" label="Loading insights…">
       <!-- ============================================================ TODAY -->
       <h2 class="group-title">Today <span class="muted">· {{ day() }}</span></h2>
       @if (daily(); as d) {
@@ -372,6 +372,6 @@
           </app-chart-card>
         </div>
       }
-    </div>
+    </app-loading>
   </div>
 </div>

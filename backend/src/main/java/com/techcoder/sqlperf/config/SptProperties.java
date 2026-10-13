@@ -15,7 +15,8 @@ public record SptProperties(
         @DefaultValue Ingestion ingestion,
         @DefaultValue Cors cors,
         @DefaultValue Ui ui,
-        @DefaultValue Diagnostics diagnostics) {
+        @DefaultValue Diagnostics diagnostics,
+        @DefaultValue Agent agent) {
 
     public enum SecurityMode { NONE, JWT }
 
@@ -78,6 +79,20 @@ public record SptProperties(
     }
 
     public enum DiagnosticsClient { MOCK }
+
+    /**
+     * The optimization agent (LLM) of step 8.
+     *
+     * @param mode            MOCK: simulated LLM answers (until the custom LLM endpoint is wired in);
+     *                        MANUAL: the analyst runs the prompt elsewhere and pastes the answer
+     * @param mockDelayMillis how long a simulated answer takes
+     */
+    public record Agent(
+            @DefaultValue("MOCK") AgentMode mode,
+            @DefaultValue("5000") long mockDelayMillis) {
+    }
+
+    public enum AgentMode { MOCK, MANUAL }
 
     public record Cors(@DefaultValue("http://localhost:4200") List<String> allowedOrigins) {
     }

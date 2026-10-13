@@ -23,6 +23,7 @@ import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, LineChart, Series, TableView } from '../../shared/charts';
 import { addDays, minutesText, num, pct, secondsText, signedPct, today } from '../../shared/dates';
 import { LogDrill, logsQuery } from '../../shared/drill';
+import { LoadingArea } from '../../shared/loading';
 import { StatusChip } from '../../shared/status-chip';
 
 interface Question {
@@ -44,6 +45,7 @@ type Preset = '7d' | '30d' | 'mtd' | '90d' | 'custom';
   imports: [
     FormsModule,
     RouterLink,
+    LoadingArea,
     MatButtonModule,
     MatButtonToggleModule,
     MatFormFieldModule,
@@ -134,6 +136,7 @@ export class Insights {
   }
 
   loadAll(): void {
+    const seq = ++this.loadSeq;
     this.loading.set(true);
     forkJoin({
       daily: this.api.daily(this.day()),
@@ -144,6 +147,7 @@ export class Insights {
       trends: this.api.trends(this.months),
     }).subscribe({
       next: (r) => {
+        if (seq !== this.loadSeq) return; // a newer day / period was asked for meanwhile
         this.daily.set(r.daily);
         this.pipeline.set(r.pipeline);
         this.savings.set(r.savings);
@@ -152,9 +156,12 @@ export class Insights {
         this.trends.set(r.trends);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: () => seq === this.loadSeq && this.loading.set(false),
     });
   }
+
+  /** id of the latest load; responses of older loads are dropped */
+  private loadSeq = 0;
 
   setPreset(p: Preset): void {
     this.preset = p;

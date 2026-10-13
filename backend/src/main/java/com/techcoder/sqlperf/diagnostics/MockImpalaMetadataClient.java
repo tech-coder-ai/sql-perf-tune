@@ -26,7 +26,7 @@ public class MockImpalaMetadataClient implements QueryMetadataClient {
 
     /** FROM / JOIN followed by a (db.)table name and an optional alias. */
     private static final Pattern TABLE = Pattern.compile(
-            "(?i)\\b(?:from|join)\\s+([a-z_][\\w$]*(?:\\.[a-z_][\\w$]*)?)(?:\\s+(?:as\\s+)?([a-z_]\\w*))?");
+            "(?i)\\b(?:from|join)\\s+(?:/\\*.*?\\*/\\s*)?([a-z_][\\w$]*(?:\\.[a-z_][\\w$]*)?)(?:\\s+(?:as\\s+)?([a-z_]\\w*))?");
     private static final Pattern QUALIFIED_COLUMN = Pattern.compile("(?i)\\b([a-z_]\\w*)\\.([a-z_]\\w*)\\b");
     private static final Set<String> NOT_ALIAS = Set.of("where", "join", "inner", "left", "right", "full", "outer",
             "cross", "on", "group", "order", "limit", "union", "having", "select", "lateral", "using", "semi", "anti");
@@ -54,21 +54,59 @@ public class MockImpalaMetadataClient implements QueryMetadataClient {
         }
         List<TableInfo> infos = new ArrayList<>();
         List<Long> rows = new ArrayList<>();
+        Tuning tuning = tuning(r.sql());
+        boolean first = true;
         for (Map.Entry<String, String> t : tables.entrySet()) {
             long n = (long) Math.pow(10, 5 + rnd.nextDouble() * 4);
-            rows.add(n);
+            // the run reads fewer rows of the partition-filtered table; the table itself is unchanged
+            rows.add(first ? Math.round(n * tuning.rowsFactor()) : n);
             infos.add(new TableInfo(t.getKey(), ddl(t.getKey(), columns(r.sql(), t.getValue()), rnd), n));
+            first = false;
         }
-        double totalSeconds = r.runMinutes() != null && r.runMinutes() > 0
-                ? r.runMinutes() * 60 : 120 + rnd.nextInt(1800);
+        double totalSeconds = (r.runMinutes() != null && r.runMinutes() > 0
+                ? r.runMinutes() * 60 : 120 + rnd.nextInt(1800)) * tuning.timeFactor();
         String queryId = hex(rnd, 16) + ":" + hex(rnd, 8) + "00000000";
-        long resultRows = 1 + rnd.nextInt(50_000);
+        // what the SQL returns depends on the query, not on how it is written: same count for every rewrite
+        long resultRows = r.originalRowCount() != null ? r.originalRowCount()
+                : 1 + new Random(r.groupId() == null ? 11 : r.groupId() * 104_729).nextInt(50_000);
         return new Result(queryId, explain(infos, rnd), profile(queryId, r.sql(), infos, rows, totalSeconds, resultRows, rnd),
                 resultRows, infos);
     }
 
+    /** How much faster a rewritten SQL runs than the logged one, judged by the rewrites it contains. */
+    record Tuning(double timeFactor, double rowsFactor) {
+    }
+
+    /**
+     * Rewrites the mock LLM applies (hints, partition filter, NDV) make the simulated run faster; each SQL text gets
+     * its own small deviation so iterations differ. The original SQL has none of them and runs as logged.
+     */
+    static Tuning tuning(String sql) {
+        String s = sql == null ? "" : sql.toLowerCase(Locale.ROOT);
+        double time = 1;
+        double rows = 1;
+        if (s.contains("+broadcast")) {
+            time *= 0.72;
+        }
+        if (s.contains("straight_join")) {
+            time *= 0.9;
+        }
+        if (s.contains("ndv(")) {
+            time *= 0.88;
+        }
+        if (s.contains("load_month")) {
+            time *= 0.6;
+            rows *= 0.35;
+        }
+        if (time < 1) {
+            double jitter = 0.92 + new Random(s.hashCode()).nextDouble() * 0.16;
+            time = Math.min(1.05, time * jitter);
+        }
+        return new Tuning(time, rows);
+    }
+
     /** table -> alias (the table's own short name when there is no alias). */
-    static Map<String, String> tables(String sql) {
+    public static Map<String, String> tables(String sql) {
         Map<String, String> out = new LinkedHashMap<>();
         if (sql == null) {
             return out;

@@ -34,4 +34,17 @@ public class AsyncConfig {
         ex.initialize();
         return ex;
     }
+
+    /** Calls to automatic optimization agents (LLM endpoint / mock): a slow model must not hold a request. */
+    @Bean(name = "agentExecutor", destroyMethod = "shutdown")
+    Executor agentExecutor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(2);
+        ex.setMaxPoolSize(2);
+        ex.setQueueCapacity(1_000);
+        ex.setThreadNamePrefix("spt-agent-");
+        ex.setWaitForTasksToCompleteOnShutdown(false);
+        ex.initialize();
+        return ex;
+    }
 }

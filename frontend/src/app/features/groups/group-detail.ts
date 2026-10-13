@@ -8,6 +8,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
@@ -23,6 +24,7 @@ import {
   SqlDiagnostic,
   TableDdl,
   Tracker,
+  AgentInfo,
 } from '../../core/models';
 import { CaptureStatusBanner } from '../../shared/capture-status';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
@@ -55,6 +57,7 @@ const MISSING_LABELS: Record<string, string> = {
     MatSelectModule,
     MatExpansionModule,
     MatTooltipModule,
+    MatProgressSpinnerModule,
     SqlBlock,
     StatusChip,
     GroupMembers,
@@ -80,6 +83,9 @@ export class GroupDetail implements OnInit {
     return s === 'PENDING' || s === 'RUNNING';
   });
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** the agent answering new runs (an automatic one answers by itself; the manual one needs a pasted answer) */
+  readonly agent = signal<AgentInfo | null>(null);
+  private runTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly group = signal<QueryGroup | null>(null);
   readonly diagnostics = signal<SqlDiagnostic[]>([]);
@@ -117,7 +123,11 @@ export class GroupDetail implements OnInit {
   }
 
   ngOnInit(): void {
-    this.destroyRef.onDestroy(() => this.pollTimer && clearTimeout(this.pollTimer));
+    this.destroyRef.onDestroy(() => {
+      if (this.pollTimer) clearTimeout(this.pollTimer);
+      if (this.runTimer) clearTimeout(this.runTimer);
+    });
+    this.api.agent().subscribe((a) => this.agent.set(a));
     this.reload();
     this.api.prompts().subscribe((p) => this.prompts.set(p));
   }
@@ -136,6 +146,7 @@ export class GroupDetail implements OnInit {
       this.ddls.set(r.ddls);
       this.runs.set(r.runs);
       this.feedback.set(r.feedback);
+      this.watchRuns();
       if (r.group.trackerId) {
         this.api.iterations(r.group.trackerId).subscribe((i) => this.iterations.set(i));
         this.watchCapture(r.group.trackerId);
@@ -228,13 +239,23 @@ export class GroupDetail implements OnInit {
   }
 
   // ---- optimization
+  /** True for a run the automatic agent is still answering (the UI waits instead of asking for a paste). */
+  waitingForAgent(r: OptimizationRun): boolean {
+    const a = this.agent();
+    return r.status === 'PENDING' && !!a?.automatic && r.modelName === a.modelName;
+  }
+
   startRun(): void {
     this.busy.set(true);
     this.api.startRun(this.groupId, this.promptTemplateId || undefined).subscribe({
       next: (r) => {
         this.busy.set(false);
         this.snack.open(
-          r.status === 'PENDING' ? 'Prompt prepared - run it in the LLM tool and paste the answer' : 'Agent run ' + r.status.toLowerCase(),
+          this.waitingForAgent(r)
+            ? `Prompt sent to ${r.modelName}; its answer becomes a new iteration`
+            : r.status === 'PENDING'
+              ? 'Prompt prepared - run it in the LLM tool and paste the answer'
+              : 'Agent run ' + r.status.toLowerCase(),
           undefined,
           { duration: 4000 },
         );
@@ -242,6 +263,29 @@ export class GroupDetail implements OnInit {
       },
       error: () => this.busy.set(false),
     });
+  }
+
+  /** While the agent works on a run, re-read the runs; when it answers, reload (new iteration, tracker stage). */
+  private watchRuns(): void {
+    if (this.runTimer) clearTimeout(this.runTimer);
+    if (!this.runs().some((r) => this.waitingForAgent(r))) return;
+    this.runTimer = setTimeout(() => {
+      this.api.runs(this.groupId).subscribe((runs) => {
+        const done = runs.filter((r) => r.status !== 'PENDING' && this.runs().some((o) => o.id === r.id && this.waitingForAgent(o)));
+        if (done.length) {
+          const r = done[0];
+          this.snack.open(
+            r.status === 'COMPLETED' ? `${r.modelName} answered run #${r.id}: new iteration on the tracker` : `Run #${r.id} failed: ${r.errorMessage}`,
+            undefined,
+            { duration: 5000 },
+          );
+          this.reload();
+        } else {
+          this.runs.set(runs);
+          this.watchRuns();
+        }
+      });
+    }, 2000);
   }
 
   responseFor(run: OptimizationRun): { text: string; model: string } {

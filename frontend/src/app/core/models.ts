@@ -647,3 +647,9 @@ export interface Bucket {
   key: string | number | null;
   count: number;
 }
+
+/** The optimization agent answering new runs: automatic ones (LLM endpoint, mock) answer by themselves. */
+export interface AgentInfo {
+  modelName: string;
+  automatic: boolean;
+}

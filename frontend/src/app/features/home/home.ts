@@ -11,12 +11,13 @@ import { STAGE, STAGE_ORDER } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, StatTile } from '../../shared/charts';
 import { addDays, minutesText, num, pct, signedPct, today } from '../../shared/dates';
 import { LogDrill, logsQuery } from '../../shared/drill';
+import { LoadingArea } from '../../shared/loading';
 import { StatusChip } from '../../shared/status-chip';
 
 /** Command center: today's bad queries and where the tuning backlog stands (Q1, Q2, Q3, Q5, Q6, Q8, Q15). */
 @Component({
   selector: 'app-home',
-  imports: [FormsModule, RouterLink, MatButtonModule, MatIconModule, MatTooltipModule, StatTile, ChartCard, ColumnChart, BarList, StatusChip],
+  imports: [FormsModule, RouterLink, MatButtonModule, MatIconModule, MatTooltipModule, StatTile, ChartCard, ColumnChart, BarList, StatusChip, LoadingArea],
   templateUrl: './home.html',
   styleUrl: './home.scss',
 })
@@ -28,6 +29,8 @@ export class Home {
   protected readonly daily = signal<DailyInsight | null>(null);
   protected readonly pipeline = signal<PipelineInsight | null>(null);
   protected readonly savings = signal<SavingsInsight | null>(null);
+  /** API requests of the selected day are in flight */
+  protected readonly loading = signal(false);
   protected readonly num = num;
   protected readonly minutesText = minutesText;
   protected readonly isToday = computed(() => this.date() === today());
@@ -74,22 +77,27 @@ export class Home {
   load(first = false): void {
     const d = this.date();
     const seq = ++this.loadSeq;
+    this.loading.set(true);
     forkJoin({
       daily: this.api.daily(d),
       pipeline: this.api.pipelineInsight({ priorDay: addDays(d, -1) }),
       savings: this.api.savings({}),
-    }).subscribe((r) => {
-      if (seq !== this.loadSeq) return;
-      const latest = r.daily.latestDataDay;
-      if (first && r.daily.badQueries === 0 && latest && latest < d) {
-        this.movedFrom.set(d);
-        this.date.set(latest);
-        this.load();
-        return;
-      }
-      this.daily.set(r.daily);
-      this.pipeline.set(r.pipeline);
-      this.savings.set(r.savings);
+    }).subscribe({
+      next: (r) => {
+        if (seq !== this.loadSeq) return;
+        const latest = r.daily.latestDataDay;
+        if (first && r.daily.badQueries === 0 && latest && latest < d) {
+          this.movedFrom.set(d);
+          this.date.set(latest);
+          this.load();
+          return;
+        }
+        this.daily.set(r.daily);
+        this.pipeline.set(r.pipeline);
+        this.savings.set(r.savings);
+        this.loading.set(false);
+      },
+      error: () => seq === this.loadSeq && this.loading.set(false),
     });
   }
 

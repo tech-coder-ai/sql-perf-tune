@@ -240,3 +240,28 @@
 .tab-body > .grid-2 {
   margin-bottom: 16px;
 }
+
+.agent-wait {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--spt-accent-soft);
+  color: var(--spt-info);
+  font-size: 13px;
+}
+
+.btn-spinner {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.row-spinner {
+  display: inline-flex;
+  width: 40px;
+  justify-content: center;
+  vertical-align: middle;
+}

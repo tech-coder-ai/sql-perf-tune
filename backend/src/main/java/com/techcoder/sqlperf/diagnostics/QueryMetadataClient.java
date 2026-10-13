@@ -13,8 +13,18 @@ import java.util.List;
  */
 public interface QueryMetadataClient {
 
-    /** What to fetch: the group's sample SQL as it ran. */
-    record Request(Long groupId, String sqlEngine, String sql, Double runMinutes) {
+    /**
+     * What to fetch / run.
+     *
+     * @param runMinutes       run time of the logged run (a real engine measures it)
+     * @param originalRowCount for a test run of a rewrite: rows the original returned. Only a simulated run uses it
+     *                         (to return the same result); a real engine returns what the SQL really returns.
+     */
+    record Request(Long groupId, String sqlEngine, String sql, Double runMinutes, Long originalRowCount) {
+
+        public Request(Long groupId, String sqlEngine, String sql, Double runMinutes) {
+            this(groupId, sqlEngine, sql, runMinutes, null);
+        }
     }
 
     /** One table read by the SQL. */
