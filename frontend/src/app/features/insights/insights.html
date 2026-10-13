@@ -267,9 +267,9 @@
             [table]="tableOf(q6Rows(p), 'Patterns')"
             [note]="'Outstanding = not adopted (untracked, in progress, on hold or rejected). Active = had bad queries in the ' + p.outstanding.activeDays + ' days up to ' + p.outstanding.asOf + '; all-time includes patterns that stopped running.'"
           >
-            <app-bar-list [rows]="q6Rows(p)" [clickable]="true" />
+            <app-bar-list [rows]="q6Rows(p)" [clickable]="true" (pick)="openQ6(p, $event)" />
             <div class="links">
-              <a mat-button routerLink="/groups" [queryParams]="{ tracked: 'false' }"><mat-icon>account_tree</mat-icon> Untracked patterns</a>
+              <a mat-button routerLink="/groups" [queryParams]="{ tracked: 'false' }"><mat-icon>account_tree</mat-icon> All untracked patterns</a>
               <a mat-button routerLink="/pipeline"><mat-icon>view_kanban</mat-icon> Pipeline board</a>
             </div>
           </app-chart-card>

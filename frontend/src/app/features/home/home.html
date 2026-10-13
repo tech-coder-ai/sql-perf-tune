@@ -117,7 +117,7 @@
 
       <app-chart-card
         title="Tuning pipeline"
-        answer="Click a stage to open it on the pipeline board"
+        answer="Click a bar to open its items (Not tracked yet: on Query groups; a stage: on the Tuning tracker)"
         [table]="{ headers: ['Stage', 'Items'], rows: stageRows().map(r => [r.label, r.value]) }"
       >
         <app-bar-list [rows]="stageRows()" [clickable]="true" (pick)="openStage($event)" />

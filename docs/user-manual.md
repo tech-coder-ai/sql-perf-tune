@@ -213,7 +213,7 @@ number includes every pattern ever loaded that is not adopted, also ones that st
 
 
 - **Tiles:** see the table above. The Q-badge shows which Insights question the tile belongs to.
-- **Bad queries by hour (Q8)**, **Tuning pipeline** (click a stage to open it on the pipeline board),
+- **Bad queries by hour (Q8)**, **Tuning pipeline** (click a bar to open its items, see below),
   **Top patterns of the day** and **the last 14 days**.
 - **All insights** opens the full Insights page.
 
@@ -226,6 +226,15 @@ number includes every pattern ever loaded that is not adopted, also ones that st
 | A bar of *Bad queries by hour* | that hour of the day |
 | A bar of *Last 14 days* | that day |
 | *Today* / *Total* in *Top patterns of the day* | that pattern's rows of the day / of all time |
+
+**From a pipeline bar to its items.** Each bar of *Tuning pipeline* opens the list it counts:
+
+| Click | Opens |
+|---|---|
+| *Not tracked yet* | **Query groups**: untracked patterns with bad queries in the same 30 days as the bar (chip *With bad queries … – …*; remove it to see all untracked patterns) |
+| A stage (Triage … Rejected) | **Tuning tracker** filtered to that stage |
+
+The whole board stays one click away under *Pipeline board* in the menu.
 
 The other tiles lead to the screen where you act on them: patterns → Query groups, outstanding and awaiting
 adoption → Pipeline board, savings → Insights.
@@ -292,6 +301,8 @@ The Insights page has an index on the left grouped as *Today*, *Tuning outcomes*
 | Q7 a user group | the period's bad queries of the group's users (*Unassigned* = users without a user group) |
 | Q7 a top user, Q13 a user | that user's bad queries in the period (exactly that user id) |
 | Q8 an hour's bar | that hour of the day |
+| Q6 *Not tracked yet* | Query groups: untracked patterns active in the 30-day window |
+| Q6 *In progress* / *Awaiting adoption* / *On hold / rejected* | Tuning tracker: those stages, limited to patterns active in the window |
 
 ---
 

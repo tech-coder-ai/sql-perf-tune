@@ -22,7 +22,7 @@ import {
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, LineChart, Series, TableView } from '../../shared/charts';
 import { addDays, minutesText, num, pct, secondsText, signedPct, today } from '../../shared/dates';
-import { LogDrill, logsQuery } from '../../shared/drill';
+import { LogDrill, activeWindow, logsQuery, stageQuery, untrackedQuery } from '../../shared/drill';
 import { LoadingArea } from '../../shared/loading';
 import { StatusChip } from '../../shared/status-chip';
 
@@ -253,13 +253,28 @@ export class Insights {
   }
 
   // ------------------------------------------------------------------ Q6, Q12, Q9
+  /** Q6 bars open the patterns they count (all within the active window of the bar). */
+  protected openQ6(p: PipelineInsight, r: BarRow): void {
+    const w = activeWindow(p.outstanding.asOf, p.outstanding.activeDays);
+    if (r.key === 'UNTRACKED') {
+      this.router.navigate(['/groups'], { queryParams: untrackedQuery(w) });
+      return;
+    }
+    const stages: Record<string, string[]> = {
+      IN_PROGRESS: ['NEW', 'DIAGNOSTICS_CAPTURED', 'OPTIMIZATION_REQUESTED', 'OPTIMIZED', 'POST_RUN_VALIDATED'],
+      AWAITING: ['SME_VALIDATION'],
+      PARKED: ['ON_HOLD', 'REJECTED'],
+    };
+    this.router.navigate(['/tracker'], { queryParams: stageQuery(stages[String(r.key)], w) });
+  }
+
   protected q6Rows(p: PipelineInsight): BarRow[] {
     const o = p.outstanding;
     return [
-      { label: 'Not tracked yet', value: o.untrackedPatterns },
-      { label: 'In progress', value: o.inProgressPatterns, sub: 'triage to tested' },
-      { label: 'Awaiting adoption', value: o.awaitingAdoptionPatterns },
-      { label: 'On hold / rejected', value: o.onHoldOrRejectedPatterns },
+      { label: 'Not tracked yet', value: o.untrackedPatterns, key: 'UNTRACKED' },
+      { label: 'In progress', value: o.inProgressPatterns, sub: 'triage to tested', key: 'IN_PROGRESS' },
+      { label: 'Awaiting adoption', value: o.awaitingAdoptionPatterns, key: 'AWAITING' },
+      { label: 'On hold / rejected', value: o.onHoldOrRejectedPatterns, key: 'PARKED' },
     ];
   }
   protected q12Rows(): BarRow[] {

@@ -452,6 +452,10 @@ All grid setup lives in `src/app/shared/grid.ts`:
   like `InsightsService`, `user` is an exact match, `userGroup` goes through `SPT_USER_DIRECTORY`
   (`Unassigned` = no group) and `pattern=RECURRING|NEW` compares the group's `firstSeen` with the `from` day.
   `LogDrillDownTest` asserts each link's row count equals the dashboard number.
+- **Pipeline links:** `untrackedQuery(window)` → `/groups?tracked=false&activeFrom&activeTo`, `stageQuery(statuses,
+  window?)` → `/tracker?status=…`. `activeFrom` / `activeTo` (groups, tracker list / buckets / export) keep
+  patterns with log rows in those days (`log/ActiveWindow`, same window as `InsightsService.ACTIVE_DAYS`);
+  `PipelineDrillDownTest` checks the counts.
 - **Master/detail:** Query Groups use `masterDetail` with `GroupDetailRow` as detail renderer (it embeds the
   `GroupMembers` grid).
 - **Renderers:** `LinkCell` (router links that don't trigger the row click), `StatusCell`.
@@ -495,7 +499,7 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 ## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 26 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, mock LLM, drill-down on SQLite
+cd backend && mvn test                     # 27 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, mock LLM, drill-down on SQLite
 # the same import round-trip test against a real Oracle (container above):
 SPT_TEST_ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 SPT_TEST_ORACLE_USER=SPT_APP \
   SPT_TEST_ORACLE_PASSWORD=<app-pwd> mvn test -Dtest=ImportRoundTripOracleIT

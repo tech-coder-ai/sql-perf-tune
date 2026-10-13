@@ -18,6 +18,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 import com.techcoder.sqlperf.common.RowGrouping;
+import com.techcoder.sqlperf.log.ActiveWindow;
+import org.springframework.format.annotation.DateTimeFormat;
 import jakarta.persistence.EntityManager;
 import java.util.Map;
 import org.springframework.http.ContentDisposition;
@@ -94,9 +96,11 @@ public class TrackerController {
             @RequestParam(required = false) String theme,
             @RequestParam(required = false) String lead,
             @RequestParam(required = false) Long groupId,
-            @RequestParam(required = false) TuningTracker.RequestSource requestSource) {
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
         var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource),
-                RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
+                active(activeFrom, activeTo), RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
         boolean byValue = sort != null && sort.startsWith(by + ",");
         boolean desc = sort == null || !byValue || sort.endsWith(",desc");
         return RowGrouping.buckets(em, TuningTracker.class, spec, GROUPABLE, by, byValue, desc, page, size);
@@ -114,9 +118,11 @@ public class TrackerController {
             @RequestParam(required = false) String theme,
             @RequestParam(required = false) String lead,
             @RequestParam(required = false) Long groupId,
-            @RequestParam(required = false) TuningTracker.RequestSource requestSource) {
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
         var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource),
-                RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
+                active(activeFrom, activeTo), RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
         var pageable = Paging.of(page, size, sort, SORTABLE,
                 Sort.by(Sort.Direction.DESC, "group.totalDurationMinutes").and(Sort.by("id")));
         var result = service.search(spec, pageable);
@@ -178,8 +184,12 @@ public class TrackerController {
             @RequestParam(required = false) List<TuningTracker.WorkflowStatus> status,
             @RequestParam(required = false) TuningTracker.Priority priority,
             @RequestParam(required = false) String theme,
-            @RequestParam(required = false) String lead) throws IOException {
-        List<TrackerDto> rows = service.searchAll(spec(q, status, priority, theme, lead, null),
+            @RequestParam(required = false) String lead,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo)
+            throws IOException {
+        List<TrackerDto> rows = service.searchAll(Specs.all(spec(q, status, priority, theme, lead, null),
+                        active(activeFrom, activeTo)),
                 Sort.by(Sort.Direction.DESC, "group.totalDurationMinutes").and(Sort.by("id")));
         if (rows.size() > EXPORT_LIMIT) {
             throw new IllegalArgumentException("Export limited to " + EXPORT_LIMIT + " rows; narrow the filter");
@@ -191,6 +201,12 @@ public class TrackerController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(name).build().toString())
                 .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(out.toByteArray());
+    }
+
+    /** Items whose pattern had bad queries between the two days (the dashboards' "active" window). */
+    private static Specification<TuningTracker> active(LocalDate from, LocalDate to) {
+        return from == null && to == null ? null
+                : (root, cq, cb) -> ActiveWindow.of(root.get("groupId"), from, to, cq, cb);
     }
 
     private static Specification<TuningTracker> spec(String q, List<TuningTracker.WorkflowStatus> status,

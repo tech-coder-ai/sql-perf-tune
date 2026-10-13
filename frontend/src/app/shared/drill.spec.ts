@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logsQuery } from './drill';
+import { activeWindow, logsQuery, stageQuery, untrackedQuery } from './drill';
 
 describe('logsQuery', () => {
   it('turns a day into a whole-day time range', () => {
@@ -34,5 +34,17 @@ describe('logsQuery', () => {
       groupId: 5,
       pattern: 'RECURRING',
     });
+  });
+});
+
+describe('pipeline links', () => {
+  it('spans the 30 days up to the day', () => {
+    expect(activeWindow('2026-10-08', 30)).toEqual({ activeFrom: '2026-09-09', activeTo: '2026-10-08' });
+  });
+
+  it('builds the groups and tracker filters', () => {
+    const w = activeWindow('2026-10-08', 30);
+    expect(untrackedQuery(w)).toEqual({ tracked: 'false', activeFrom: '2026-09-09', activeTo: '2026-10-08' });
+    expect(stageQuery(['NEW'])).toEqual({ status: ['NEW'] });
   });
 });

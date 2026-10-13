@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
@@ -60,6 +61,7 @@ export class TrackerCell implements ICellRendererAngularComp {
     MatButtonModule,
     MatIconModule,
     MatTooltipModule,
+    MatChipsModule,
   ],
   templateUrl: './groups.html',
   styleUrl: './groups.scss',
@@ -73,7 +75,16 @@ export class Groups {
   readonly total = signal(0);
   readonly selected = signal<number[]>([]);
 
-  filter = { q: '', userId: '', minGroupSize: null as number | null, minAvgDuration: null as number | null, tracked: '' };
+  filter = {
+    q: '',
+    userId: '',
+    minGroupSize: null as number | null,
+    minAvgDuration: null as number | null,
+    tracked: '',
+    /** only groups with bad queries between these days (links from the dashboards' pipeline bars) */
+    activeFrom: null as string | null,
+    activeTo: null as string | null,
+  };
 
   readonly gridOptions: GridOptions<QueryGroup> = {
     ...serverGridOptions<QueryGroup>(25),
@@ -178,7 +189,10 @@ export class Groups {
 
   onReady(e: GridReadyEvent<QueryGroup>): void {
     this.grid = e.api;
-    this.filter.tracked = this.route.snapshot.queryParamMap.get('tracked') ?? '';
+    const qp = this.route.snapshot.queryParamMap;
+    this.filter.tracked = qp.get('tracked') ?? '';
+    this.filter.activeFrom = qp.get('activeFrom');
+    this.filter.activeTo = qp.get('activeTo');
     e.api.setGridOption(
       'serverSideDatasource',
       groupingDatasource<QueryGroup>(
@@ -200,7 +214,15 @@ export class Groups {
       minGroupSize: f.minGroupSize,
       minAvgDuration: f.minAvgDuration,
       tracked: f.tracked || null,
+      activeFrom: f.activeFrom,
+      activeTo: f.activeTo,
     };
+  }
+
+  dropWindow(): void {
+    this.filter.activeFrom = null;
+    this.filter.activeTo = null;
+    this.search();
   }
 
   search(): void {

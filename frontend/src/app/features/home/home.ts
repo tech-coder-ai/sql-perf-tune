@@ -10,7 +10,7 @@ import { DailyInsight, PipelineInsight, SavingsInsight, WorkflowStatus } from '.
 import { STAGE, STAGE_ORDER } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, StatTile } from '../../shared/charts';
 import { addDays, minutesText, num, pct, signedPct, today } from '../../shared/dates';
-import { LogDrill, logsQuery } from '../../shared/drill';
+import { LogDrill, activeWindow, logsQuery, stageQuery, untrackedQuery } from '../../shared/drill';
 import { LoadingArea } from '../../shared/loading';
 import { StatusChip } from '../../shared/status-chip';
 
@@ -144,9 +144,18 @@ export class Home {
     return pct(d.recurringQueries, d.badQueries);
   }
 
+  /**
+   * A pipeline bar opens the list behind its number: "Not tracked yet" → Query groups (untracked, with bad queries
+   * in the same window as the bar); a stage → Tuning tracker filtered to that stage (the bar counts every item in it).
+   */
   openStage(r: BarRow): void {
-    if (r.key === 'UNTRACKED') this.router.navigate(['/groups'], { queryParams: { tracked: 'false' } });
-    else this.router.navigate(['/pipeline'], { fragment: String(r.key) });
+    const p = this.pipeline();
+    if (r.key === 'UNTRACKED' && p) {
+      const w = activeWindow(p.outstanding.asOf, p.outstanding.activeDays);
+      this.router.navigate(['/groups'], { queryParams: untrackedQuery(w) });
+    } else {
+      this.router.navigate(['/tracker'], { queryParams: stageQuery([String(r.key)]) });
+    }
   }
 
   peakText(d: DailyInsight): string {

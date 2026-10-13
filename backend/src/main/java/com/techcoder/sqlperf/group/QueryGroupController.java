@@ -1,5 +1,6 @@
 package com.techcoder.sqlperf.group;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +22,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import com.techcoder.sqlperf.common.RowGrouping;
+import com.techcoder.sqlperf.log.ActiveWindow;
+import org.springframework.format.annotation.DateTimeFormat;
 import jakarta.persistence.EntityManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -59,8 +62,11 @@ public class QueryGroupController {
         this.customFields = customFields;
     }
 
+    /** @param activeFrom / activeTo only groups with bad queries between these days (both inclusive) */
     public record GroupFilter(String q, String userId, String sqlEngine, Integer minGroupSize, Double minAvgDuration,
-                              Boolean tracked) {
+                              Boolean tracked,
+                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
     }
 
     /** Columns the grid can group by. */
@@ -115,6 +121,8 @@ public class QueryGroupController {
                 Specs.gte("avgDurationMinutes", f.minAvgDuration()),
                 Specs.gte("groupSize", 1),
                 trackedSpec,
+                f.activeFrom() == null && f.activeTo() == null ? null
+                        : (root, cq, cb) -> ActiveWindow.of(root.get("id"), f.activeFrom(), f.activeTo(), cq, cb),
                 RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
     }
 

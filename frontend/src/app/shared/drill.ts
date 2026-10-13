@@ -42,3 +42,20 @@ export function logsQuery(d: LogDrill): Params {
   if (d.pattern) q['pattern'] = d.pattern;
   return q;
 }
+
+/** First and last day of the dashboards' "active" window (the bars count patterns with bad queries in it). */
+export function activeWindow(asOf: string, activeDays: number): { activeFrom: string; activeTo: string } {
+  const d = new Date(asOf + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - (activeDays - 1));
+  return { activeFrom: d.toISOString().substring(0, 10), activeTo: asOf };
+}
+
+/** Query groups: untracked patterns, optionally only those with bad queries in a window. */
+export function untrackedQuery(window?: { activeFrom: string; activeTo: string }): Params {
+  return { tracked: 'false', ...(window ?? {}) };
+}
+
+/** Tuning tracker: items in these stages, optionally only those whose pattern had bad queries in a window. */
+export function stageQuery(statuses: string[], window?: { activeFrom: string; activeTo: string }): Params {
+  return { status: statuses, ...(window ?? {}) };
+}

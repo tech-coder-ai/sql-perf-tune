@@ -19,10 +19,10 @@
         <mat-icon matSuffix>search</mat-icon>
       </mat-form-field>
       <mat-form-field class="wide">
-        <mat-label>Status</mat-label>
+        <mat-label>Stage</mat-label>
         <mat-select name="status" [(ngModel)]="filter.status" multiple>
           @for (s of statuses; track s) {
-            <mat-option [value]="s">{{ s.replaceAll('_', ' ') }}</mat-option>
+            <mat-option [value]="s">{{ stage[s].label }}</mat-option>
           }
         </mat-select>
       </mat-form-field>
@@ -53,6 +53,18 @@
       <span class="key delta">Δ % change</span>
       <span>Δ is post vs original: <span class="good">negative = faster / less</span>, <span class="bad">positive = slower / more</span>. More metrics in the Columns panel.</span>
     </div>
+
+    @if (filter.activeFrom || filter.activeTo) {
+      <div class="link-filters">
+        <span class="muted">Opened with:</span>
+        <mat-chip-set aria-label="Filters from the link">
+          <mat-chip (removed)="dropWindow()">
+            With bad queries {{ filter.activeFrom }} – {{ filter.activeTo }}
+            <button matChipRemove aria-label="Remove the date window"><mat-icon>cancel</mat-icon></button>
+          </mat-chip>
+        </mat-chip-set>
+      </div>
+    }
 
     <ag-grid-angular
       class="grid"

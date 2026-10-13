@@ -43,6 +43,18 @@
       <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
     </form>
 
+    @if (filter.activeFrom || filter.activeTo) {
+      <div class="link-filters">
+        <span class="muted">Opened with:</span>
+        <mat-chip-set aria-label="Filters from the link">
+          <mat-chip (removed)="dropWindow()">
+            With bad queries {{ filter.activeFrom }} – {{ filter.activeTo }}
+            <button matChipRemove aria-label="Remove the date window"><mat-icon>cancel</mat-icon></button>
+          </mat-chip>
+        </mat-chip-set>
+      </div>
+    }
+
     <ag-grid-angular
       class="grid"
       [gridOptions]="gridOptions"
