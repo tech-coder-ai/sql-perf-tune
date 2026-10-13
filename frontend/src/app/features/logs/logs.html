@@ -37,15 +37,23 @@
       </mat-form-field>
       <mat-checkbox name="errorsOnly" [(ngModel)]="filter.errorsOnly">Errors only</mat-checkbox>
       <mat-checkbox name="reloadedOnly" [(ngModel)]="filter.reloadedOnly" matTooltip="Rows that appeared in more than one load">Re-loaded only</mat-checkbox>
-      @if (filter.groupId) {
-        <span class="muted">Group #{{ filter.groupId }}</span>
-      }
-      @if (filter.batchId) {
-        <span class="muted">Import #{{ filter.batchId }}</span>
-      }
       <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
       <button mat-button type="button" (click)="reset()">Reset</button>
     </form>
+
+    @if (linkFilters().length) {
+      <div class="link-filters">
+        <span class="muted">Opened with:</span>
+        <mat-chip-set aria-label="Filters from the link">
+          @for (c of linkFilters(); track c.key) {
+            <mat-chip (removed)="dropLinkFilter(c.key)">
+              {{ c.label }}
+              <button matChipRemove [attr.aria-label]="'Remove ' + c.label"><mat-icon>cancel</mat-icon></button>
+            </mat-chip>
+          }
+        </mat-chip-set>
+      </div>
+    }
 
     <ag-grid-angular
       class="grid"

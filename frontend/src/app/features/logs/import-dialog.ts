@@ -61,14 +61,22 @@ import { StatusChip } from '../../shared/status-chip';
             Header: seq_id, executed_query, user_query, error_code, error_category, error_message, user_id, start_time,
             end_time, duration_minutes. Rows already loaded are skipped; an identical file is recognised and not re-processed.
           </p>
-          <mat-form-field>
-            <mat-label>SQL engine</mat-label>
-            <mat-select [(ngModel)]="engine">
-              @for (e of engines; track e) {
-                <mat-option [value]="e">{{ e }}</mat-option>
-              }
-            </mat-select>
-          </mat-form-field>
+          <!-- a file does not say which engine ran its SQL; the engine is part of the grouping key, default Impala -->
+          @if (changeEngine()) {
+            <mat-form-field>
+              <mat-label>SQL engine of this file</mat-label>
+              <mat-select [(ngModel)]="engine">
+                @for (e of engines; track e) {
+                  <mat-option [value]="e">{{ e }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          } @else {
+            <p class="muted engine">
+              SQL engine: <b>{{ engine }}</b>
+              <button mat-button type="button" (click)="changeEngine.set(true)">change</button>
+            </p>
+          }
         } @else {
           @if (sources().length === 0) {
             <p class="muted">No data sources configured yet. Add one under Administration → Data sources.</p>
@@ -83,6 +91,9 @@ import { StatusChip } from '../../shared/status-chip';
                 }
               </mat-select>
             </mat-form-field>
+            @if (sourceEngine(); as e) {
+              <p class="muted engine">SQL engine: <b>{{ e }}</b> (set on the data source in Administration)</p>
+            }
           }
         }
       }
@@ -155,6 +166,7 @@ import { StatusChip } from '../../shared/status-chip';
     .dup { display: flex; gap: 8px; align-items: center; color: var(--spt-warn); }
     pre { max-height: 160px; overflow: auto; font-size: 12px; background: var(--spt-code-bg); padding: 8px; border-radius: 8px; white-space: pre-wrap; margin: 0; }
     .danger { color: var(--spt-bad); }
+    .engine { display: flex; align-items: center; gap: 4px; margin: 4px 0 0; }
   `,
 })
 export class ImportDialog implements OnDestroy {
@@ -165,6 +177,8 @@ export class ImportDialog implements OnDestroy {
   sourceId: number | null = null;
   readonly engines = ['IMPALA', 'HIVE', 'ORACLE', 'SPARK', 'OTHER'];
   readonly file = signal<File | null>(null);
+  /** the engine picker for files stays folded until asked for */
+  readonly changeEngine = signal(false);
   readonly dragOver = signal(false);
   readonly busy = signal(false);
   readonly cancelling = signal(false);
@@ -174,6 +188,10 @@ export class ImportDialog implements OnDestroy {
 
   constructor() {
     this.api.dataSources().subscribe((s) => this.sources.set(s));
+  }
+
+  sourceEngine(): string | null {
+    return this.sources().find((s) => s.id === this.sourceId)?.sqlEngine ?? null;
   }
 
   onPick(e: Event): void {

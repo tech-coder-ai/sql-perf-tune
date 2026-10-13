@@ -7,13 +7,33 @@
     <span class="spacer"></span>
     <div class="date-nav">
       <button mat-icon-button (click)="shift(-1)" aria-label="Previous day"><mat-icon>chevron_left</mat-icon></button>
-      <input type="date" [value]="date()" (change)="setDate($any($event.target).value)" aria-label="Day" />
+      <input
+        type="date"
+        [value]="date()"
+        [max]="maxDate"
+        (input)="setDate($any($event.target).value)"
+        (change)="setDate($any($event.target).value)"
+        aria-label="Day"
+      />
       <button mat-icon-button (click)="shift(1)" [disabled]="isToday()" aria-label="Next day"><mat-icon>chevron_right</mat-icon></button>
     </div>
     <a mat-stroked-button routerLink="/insights"><mat-icon>insights</mat-icon> All insights</a>
   </div>
 
+  <app-loading [loading]="loading()" [empty]="!daily()" [label]="'Loading ' + date() + '…'">
   @if (daily(); as d) {
+    @if (movedFrom(); as was) {
+      <div class="notice" role="status">
+        <mat-icon>info</mat-icon>
+        <span>No bad queries are loaded for {{ was }} yet (the daily extract usually covers the day before). Showing <strong>{{ d.date }}</strong>, the latest day with data.</span>
+      </div>
+    } @else if (d.badQueries === 0 && d.latestDataDay && d.latestDataDay !== d.date) {
+      <div class="notice" role="status">
+        <mat-icon>info</mat-icon>
+        <span>No bad queries on {{ d.date }}. The latest loaded day is <strong>{{ d.latestDataDay }}</strong>.</span>
+        <button mat-button (click)="showLatest(d)">Show {{ d.latestDataDay }}</button>
+      </div>
+    }
     <div class="tiles">
       <app-stat-tile
         class="hero-tile"
@@ -26,6 +46,8 @@
         [deltaGood]="d.badQueries < d.badQueriesPreviousDay ? true : d.badQueries > d.badQueriesPreviousDay ? false : null"
         [hint]="minutesText(d.totalMinutes) + ' of run time'"
         link="/logs"
+        [query]="logs({ day: d.date })"
+        linkTitle="Open these bad queries in Query logs"
       />
       <app-stat-tile
         q="Q2"
@@ -33,7 +55,9 @@
         label="Recurring"
         [value]="num(d.recurringQueries)"
         [hint]="recurringShare(d) + ' of the day · ' + d.recurringPatterns + ' known patterns'"
-        link="/groups"
+        link="/logs"
+        [query]="logs({ day: d.date, pattern: 'RECURRING' })"
+        linkTitle="Open the recurring bad queries in Query logs"
       />
       <app-stat-tile
         q="Q3"
@@ -49,14 +73,14 @@
           icon="pending_actions"
           label="Outstanding patterns"
           [value]="num(p.outstanding.patterns)"
-          [hint]="num(p.outstanding.badQueries) + ' bad queries not yet tuned'"
+          [hint]="'active in the last ' + p.outstanding.activeDays + ' days · ' + num(p.outstanding.allTimePatterns) + ' all-time'"
           link="/pipeline"
         />
         <app-stat-tile
           q="Q15"
           icon="hourglass_top"
           label="Awaiting adoption"
-          [value]="num(p.outstanding.awaitingAdoptionPatterns)"
+          [value]="num(stageCount(p, 'SME_VALIDATION'))"
           [hint]="p.rejections.total + ' rejections in 90 days'"
           link="/pipeline"
         />
@@ -81,12 +105,19 @@
         [answer]="peakText(d)"
         [table]="{ headers: ['Hour', 'Bad queries'], rows: d.byHour.map(h => [h.label + ':00', h.count]) }"
       >
-        <app-column-chart [data]="hourData()" [highlight]="d.peakHour" unit="bad queries" ariaLabel="Bad queries by hour" />
+        <app-column-chart
+          [data]="hourData()"
+          [highlight]="d.peakHour"
+          unit="bad queries"
+          ariaLabel="Bad queries by hour"
+          [clickable]="true"
+          (pick)="openLogs({ day: d.date, hour: $event })"
+        />
       </app-chart-card>
 
       <app-chart-card
         title="Tuning pipeline"
-        answer="Click a stage to open it on the pipeline board"
+        answer="Click a bar to open its items (Not tracked yet: on Query groups; a stage: on the Tuning tracker)"
         [table]="{ headers: ['Stage', 'Items'], rows: stageRows().map(r => [r.label, r.value]) }"
       >
         <app-bar-list [rows]="stageRows()" [clickable]="true" (pick)="openStage($event)" />
@@ -115,8 +146,26 @@
                 </div>
                 <div class="sql">{{ p.sqlSnippet }}</div>
               </td>
-              <td class="num">{{ num(p.count) }}</td>
-              <td class="num">{{ num(p.totalInstances) }}</td>
+              <td class="num">
+                <a
+                  class="link"
+                  [routerLink]="['/logs']"
+                  [queryParams]="logs({ day: d.date, groupId: p.groupId })"
+                  (click)="$event.stopPropagation()"
+                  matTooltip="Open this pattern's bad queries of the day in Query logs"
+                  >{{ num(p.count) }}</a
+                >
+              </td>
+              <td class="num">
+                <a
+                  class="link"
+                  [routerLink]="['/logs']"
+                  [queryParams]="logs({ groupId: p.groupId })"
+                  (click)="$event.stopPropagation()"
+                  matTooltip="Open every bad query of this pattern in Query logs"
+                  >{{ num(p.totalInstances) }}</a
+                >
+              </td>
               <td>
                 @if (p.status) {
                   <app-status [value]="p.status" />
@@ -136,8 +185,16 @@
         answer="Bad queries per day"
         [table]="{ headers: ['Day', 'Bad queries'], rows: d.last14Days.map(x => [x.label, x.count]) }"
       >
-        <app-column-chart [data]="dayData()" [highlight]="13" unit="bad queries" ariaLabel="Bad queries per day" />
+        <app-column-chart
+          [data]="dayData()"
+          [highlight]="13"
+          unit="bad queries"
+          ariaLabel="Bad queries per day"
+          [clickable]="true"
+          (pick)="openLogs({ day: d.last14Days[$event].label })"
+        />
       </app-chart-card>
     </div>
   }
+  </app-loading>
 </div>

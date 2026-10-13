@@ -39,6 +39,8 @@ export const TRACKER_COLUMNS: TrackerColumn[] = [
   { key: 'daysInStage', label: 'Days in stage', kind: 'days', visible: true },
   { key: 'priority', label: 'Priority', kind: 'status', sort: 'priority', visible: true },
   { key: 'requestSource', label: 'Source', kind: 'status', sort: 'requestSource', visible: true },
+  { key: 'sqlEngine', label: 'SQL engine', kind: 'text', visible: false },
+  { key: 'captureStatus', label: 'Diagnostics capture', kind: 'status', visible: false },
   { key: 'iterationCount', label: 'Iterations', kind: 'num', visible: true },
   { key: 'groupSize', label: 'Group size', kind: 'num', sort: 'group.groupSize', visible: true },
   { key: 'distinctUsers', label: 'Distinct users', kind: 'num', sort: 'group.distinctUsers', visible: true },
@@ -102,6 +104,28 @@ export const TRACKER_COLUMNS: TrackerColumn[] = [
   { key: 'updatedAt', label: 'Updated', kind: 'ts', sort: 'updatedAt', visible: false },
   { key: 'updatedBy', label: 'Updated by', kind: 'text', visible: false },
 ];
+
+/** Columns the server can group by (TrackerController.GROUPABLE). */
+export const GROUPABLE = new Set([
+  'workflowStatus',
+  'priority',
+  'requestSource',
+  'captureStatus',
+  'sqlEngine',
+  'theme',
+  'environment',
+  'requestedBy',
+  'devTeamLead',
+  'devTeamStatus',
+  'clouderaTeamLead',
+  'smeTeamLead',
+  'optimizedSqlStatus',
+  'clouderaPostRunValidation',
+  'smeValidation',
+  'installStatus',
+  'executeStatus',
+  'validationStatus',
+]);
 
 export function cellValue(row: Tracker, key: string): unknown {
   if (key.startsWith('cf:')) return row.customFields?.[key.substring(3)];

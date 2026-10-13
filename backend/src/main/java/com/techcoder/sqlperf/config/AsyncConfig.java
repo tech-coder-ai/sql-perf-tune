@@ -21,4 +21,30 @@ public class AsyncConfig {
         ex.initialize();
         return ex;
     }
+
+    /** Automatic diagnostics captures (explain / profile / DDL fetches) of newly tracked groups. */
+    @Bean(name = "diagnosticsExecutor", destroyMethod = "shutdown")
+    Executor diagnosticsExecutor(SptProperties props) {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(Math.max(1, props.diagnostics().threads()));
+        ex.setMaxPoolSize(Math.max(1, props.diagnostics().threads()));
+        ex.setQueueCapacity(10_000);
+        ex.setThreadNamePrefix("spt-capture-");
+        ex.setWaitForTasksToCompleteOnShutdown(false);
+        ex.initialize();
+        return ex;
+    }
+
+    /** Calls to automatic optimization agents (LLM endpoint / mock): a slow model must not hold a request. */
+    @Bean(name = "agentExecutor", destroyMethod = "shutdown")
+    Executor agentExecutor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(2);
+        ex.setMaxPoolSize(2);
+        ex.setQueueCapacity(1_000);
+        ex.setThreadNamePrefix("spt-agent-");
+        ex.setWaitForTasksToCompleteOnShutdown(false);
+        ex.initialize();
+        return ex;
+    }
 }

@@ -32,6 +32,7 @@ import com.techcoder.sqlperf.tracker.TuningTracker.RequestSource;
 import com.techcoder.sqlperf.tracker.TuningTracker.WorkflowStatus;
 import org.springframework.beans.BeanWrapper;
 import org.springframework.beans.BeanWrapperImpl;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -61,10 +62,16 @@ public class TrackerService {
     private final AuditService audit;
     private final SqlPrettyPrinter pretty;
     private final SqlFingerprinter fingerprinter;
+    private final ApplicationEventPublisher events;
+
+    /** Published inside the creating transaction; listeners start the automatic diagnostics capture. */
+    public record TrackerCreated(TuningTracker tracker) {
+    }
 
     public TrackerService(TuningTrackerRepository trackers, QueryGroupRepository groups, QueryLogRepository logs,
                           TuningIterationRepository iterations, CustomFieldService customFields, LookupService lookups,
-                          AuditService audit, SqlPrettyPrinter pretty, SqlFingerprinter fingerprinter) {
+                          AuditService audit, SqlPrettyPrinter pretty, SqlFingerprinter fingerprinter,
+                          ApplicationEventPublisher events) {
         this.trackers = trackers;
         this.groups = groups;
         this.logs = logs;
@@ -74,6 +81,7 @@ public class TrackerService {
         this.audit = audit;
         this.pretty = pretty;
         this.fingerprinter = fingerprinter;
+        this.events = events;
     }
 
     // ------------------------------------------------------------------ queries
@@ -292,6 +300,7 @@ public class TrackerService {
         t.setCreatedBy(CurrentUser.name());
         TuningTracker saved = trackers.save(t);
         audit.created(AUDIT_TYPE, saved.getId());
+        events.publishEvent(new TrackerCreated(saved));
         return saved;
     }
 

@@ -24,6 +24,7 @@ import {
   LoadHistoryEntry,
   OptimizationRun,
   Page,
+  PromptPreview,
   PromptTemplate,
   QueryGroup,
   QueryLog,
@@ -31,6 +32,8 @@ import {
   SqlDiagnostic,
   TableDdl,
   Tracker,
+  Bucket,
+  AgentInfo,
 } from './models';
 
 export type Params = Record<string, string | number | boolean | readonly string[] | null | undefined>;
@@ -56,6 +59,10 @@ export class Api {
   // ----- logs
   logs(p: Params): Observable<Page<QueryLog>> {
     return this.http.get<Page<QueryLog>>('/api/logs', { params: toParams(p) });
+  }
+  /** Row grouping: distinct values of a column with row counts, under the screen's filters (see RowGrouping). */
+  buckets(resource: 'logs' | 'groups' | 'tracker', p: Params): Observable<Page<Bucket>> {
+    return this.http.get<Page<Bucket>>(`/api/${resource}/buckets`, { params: toParams(p) });
   }
   log(id: number): Observable<QueryLog> {
     return this.http.get<QueryLog>(`/api/logs/${id}`);
@@ -110,6 +117,10 @@ export class Api {
   updateTracker(id: number, body: Partial<Tracker>): Observable<Tracker> {
     return this.http.put<Tracker>(`/api/tracker/${id}`, body);
   }
+  /** Starts the automatic explain / profile / DDL capture again; progress is on the returned item. */
+  recapture(id: number): Observable<Tracker> {
+    return this.http.post<Tracker>(`/api/tracker/${id}/capture`, null);
+  }
   trackerHistory(id: number): Observable<AuditEvent[]> {
     return this.http.get<AuditEvent[]>(`/api/tracker/${id}/history`);
   }
@@ -135,6 +146,11 @@ export class Api {
   }
   runs(groupId: number): Observable<OptimizationRun[]> {
     return this.http.get<OptimizationRun[]>(`/api/groups/${groupId}/optimization-runs`);
+  }
+  /** Rendered prompt for a template (default: the active one) without starting a run. */
+  promptPreview(groupId: number, promptTemplateId?: number | null): Observable<PromptPreview> {
+    const params: Record<string, string> = promptTemplateId ? { promptTemplateId: String(promptTemplateId) } : {};
+    return this.http.get<PromptPreview>(`/api/groups/${groupId}/prompt-preview`, { params });
   }
   startRun(groupId: number, promptTemplateId?: number): Observable<OptimizationRun> {
     return this.http.post<OptimizationRun>(`/api/groups/${groupId}/optimization-runs`, { promptTemplateId });
@@ -167,6 +183,13 @@ export class Api {
   }
   addIteration(trackerId: number, body: object): Observable<Iteration> {
     return this.http.post<Iteration>(`/api/tracker/${trackerId}/iterations`, body);
+  }
+  /** Runs the iteration's SQL on the engine and records the test; returns the item's iterations. */
+  testIteration(trackerId: number, id: number): Observable<Iteration[]> {
+    return this.http.post<Iteration[]>(`/api/tracker/${trackerId}/iterations/${id}/test`, null);
+  }
+  agent(): Observable<AgentInfo> {
+    return this.http.get<AgentInfo>('/api/agent');
   }
   updateIteration(trackerId: number, id: number, body: object): Observable<Iteration> {
     return this.http.put<Iteration>(`/api/tracker/${trackerId}/iterations/${id}`, body);

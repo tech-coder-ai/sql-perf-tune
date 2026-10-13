@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 
 import com.techcoder.sqlperf.common.CurrentUser;
 import com.techcoder.sqlperf.common.NotFoundException;
@@ -17,8 +18,14 @@ import com.techcoder.sqlperf.tracker.TrackerService;
 import com.techcoder.sqlperf.tracker.TuningTracker;
 import com.techcoder.sqlperf.tracker.TuningTracker.WorkflowStatus;
 import com.techcoder.sqlperf.tracker.TuningTrackerRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -43,12 +50,15 @@ public class WorkflowService {
     private final JsonMapper json;
     private final IterationService iterations;
     private final LookupService lookups;
+    private final Executor agentExecutor;
+    private final TransactionTemplate tx;
 
     public WorkflowService(QueryGroupRepository groups, SqlDiagnosticRepository diagnostics, TableDdlRepository ddls,
                            PromptTemplateRepository prompts, OptimizationRunRepository runs,
                            FeedbackRepository feedback, TuningTrackerRepository trackers, TrackerService trackerService,
                            ImpalaProfileParser profileParser, PromptRenderer renderer, List<OptimizationAgent> agents,
-                           JsonMapper json, IterationService iterations, LookupService lookups) {
+                           JsonMapper json, IterationService iterations, LookupService lookups,
+                           @Qualifier("agentExecutor") Executor agentExecutor, TransactionTemplate tx) {
         this.groups = groups;
         this.diagnostics = diagnostics;
         this.ddls = ddls;
@@ -64,6 +74,8 @@ public class WorkflowService {
         this.json = json;
         this.iterations = iterations;
         this.lookups = lookups;
+        this.agentExecutor = agentExecutor;
+        this.tx = tx;
     }
 
     // ------------------------------------------------------------------ diagnostics (steps 4-6, 10)
@@ -248,15 +260,45 @@ public class WorkflowService {
     // ------------------------------------------------------------------ optimization (steps 7-9)
 
     @Transactional
-    public OptimizationRun startOptimization(Long groupId, Long promptTemplateId) {
+    /** The prompt a run would send, rendered for the group, plus the inputs not captured yet (nothing is stored). */
+    public record PromptPreview(Long promptTemplateId, String templateName, int versionNo, String promptText,
+                                List<String> missingInputs) {
+    }
+
+    @Transactional(readOnly = true)
+    public PromptPreview previewPrompt(Long groupId, Long promptTemplateId) {
         QueryGroup g = group(groupId);
-        PromptTemplate tpl = promptTemplateId != null
+        PromptTemplate tpl = template(g, promptTemplateId);
+        SqlDiagnostic original = latestOriginal(groupId);
+        List<TableDdl> groupDdls = ddls.findByGroupIdOrderByIdDesc(groupId);
+        return new PromptPreview(tpl.getId(), tpl.getName(), tpl.getVersionNo(),
+                renderer.render(tpl.getTemplateText(), g, original, groupDdls),
+                renderer.missing(tpl.getTemplateText(), g, original, groupDdls));
+    }
+
+    private PromptTemplate template(QueryGroup g, Long promptTemplateId) {
+        return promptTemplateId != null
                 ? prompts.findById(promptTemplateId).orElseThrow(() -> new NotFoundException("Prompt template", promptTemplateId))
                 : prompts.findFirstBySqlEngineAndActiveTrueOrderByVersionNoDesc(g.getSqlEngine())
                         .orElseThrow(() -> new IllegalArgumentException("No active prompt template for " + g.getSqlEngine()));
-        SqlDiagnostic original = diagnostics.findByGroupIdOrderByIdDesc(groupId).stream()
+    }
+
+    private SqlDiagnostic latestOriginal(Long groupId) {
+        return diagnostics.findByGroupIdOrderByIdDesc(groupId).stream()
                 .filter(d -> d.getPhase() == SqlDiagnostic.Phase.ORIGINAL && d.getStatus() == SqlDiagnostic.Status.CAPTURED)
                 .findFirst().orElse(null);
+    }
+
+    /**
+     * Records a run with the rendered prompt. An automatic agent (LLM endpoint, mock) is then called in the
+     * background once the run is committed: the run stays PENDING until the answer arrives, which becomes a
+     * tuning iteration. With the manual agent the analyst pastes the answer ({@link #submitResponse}).
+     */
+    @Transactional
+    public OptimizationRun startOptimization(Long groupId, Long promptTemplateId) {
+        QueryGroup g = group(groupId);
+        PromptTemplate tpl = template(g, promptTemplateId);
+        SqlDiagnostic original = latestOriginal(groupId);
 
         OptimizationRun run = new OptimizationRun();
         run.setGroupId(groupId);
@@ -268,15 +310,73 @@ public class WorkflowService {
         runs.save(run);
         trackerService.applyWorkflow(groupId, WorkflowStatus.OPTIMIZATION_REQUESTED, null);
 
-        try {
-            Optional<String> answer = agent.optimize(run.getPromptText());
-            answer.ifPresent(a -> complete(run, a, agent.modelName()));
-        } catch (RuntimeException e) {
-            run.setStatus(OptimizationRun.Status.FAILED);
-            run.setErrorMessage(e.getMessage());
-            run.setCompletedAt(LocalDateTime.now());
+        if (agent.automatic()) {
+            OptimizationAgent.Request req = agentRequest(g, run);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    agentExecutor.execute(() -> callAgent(run.getId(), req));
+                }
+            });
         }
         return run;
+    }
+
+    private OptimizationAgent.Request agentRequest(QueryGroup g, OptimizationRun run) {
+        int attempt = (int) runs.countByGroupIdAndIdLessThan(g.getId(), run.getId());
+        return new OptimizationAgent.Request(g.getId(), run.getId(), g.getSqlEngine(), g.getSampleQuery(),
+                run.getPromptText(), attempt);
+    }
+
+    /** Background part of a run: ask the agent (no transaction held), then store the answer as the requester. */
+    void callAgent(Long runId, OptimizationAgent.Request req) {
+        String model = agent.modelName();
+        try {
+            Optional<String> answer = agent.optimize(req);
+            tx.executeWithoutResult(s -> {
+                OptimizationRun run = runs.findById(runId).orElse(null);
+                if (run != null && run.getStatus() == OptimizationRun.Status.PENDING && answer.isPresent()) {
+                    CurrentUser.runAs(run.getRequestedBy() == null ? model : run.getRequestedBy(), () -> {
+                        complete(run, answer.get(), model);
+                        return null;
+                    });
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            tx.executeWithoutResult(s -> runs.findById(runId).ifPresent(run -> {
+                if (run.getStatus() == OptimizationRun.Status.PENDING) {
+                    run.setStatus(OptimizationRun.Status.FAILED);
+                    run.setErrorMessage(Texts.truncate(model + " did not answer: "
+                            + (e.getMessage() == null ? e.toString() : e.getMessage()), 2000));
+                    run.setCompletedAt(LocalDateTime.now());
+                }
+            }));
+        }
+    }
+
+    /** Runs whose agent call was cut short by a restart are asked again. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void resumePendingRuns() {
+        if (!agent.automatic()) {
+            return;
+        }
+        List<PendingCall> calls = tx.execute(s -> runs
+                .findByStatusAndModelName(OptimizationRun.Status.PENDING, agent.modelName()).stream()
+                .map(r -> new PendingCall(r.getId(), agentRequest(group(r.getGroupId()), r))).toList());
+        calls.forEach(c -> agentExecutor.execute(() -> callAgent(c.runId(), c.request())));
+    }
+
+    private record PendingCall(Long runId, OptimizationAgent.Request request) {
+    }
+
+    /** Model that answers new runs and whether it does so by itself (the UI waits for it, or asks for a paste). */
+    public record AgentInfo(String modelName, boolean automatic) {
+    }
+
+    public AgentInfo agentInfo() {
+        return new AgentInfo(agent.modelName(), agent.automatic());
     }
 
     @Transactional

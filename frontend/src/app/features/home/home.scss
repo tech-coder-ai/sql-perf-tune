@@ -63,3 +63,20 @@
   text-overflow: ellipsis;
   margin-top: 2px;
 }
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: var(--spt-accent-soft);
+  color: var(--mat-sys-on-surface);
+  font-size: 13px;
+
+  mat-icon {
+    color: var(--spt-accent);
+  }
+}

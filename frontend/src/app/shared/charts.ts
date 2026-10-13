@@ -78,7 +78,7 @@ abstract class Responsive implements OnInit, OnDestroy {
         <text [attr.x]="layout().left - 6" [attr.y]="t.y + 4" class="tick" text-anchor="end">{{ t.label }}</text>
       }
       @for (b of layout().bars; track b.i) {
-        <g (mouseenter)="hover.set(b.i)" (mouseleave)="hover.set(null)" (click)="pick.emit(b.i)" class="hit">
+        <g (mouseenter)="hover.set(b.i)" (mouseleave)="hover.set(null)" (click)="pick.emit(b.i)" class="hit" [class.clickable]="clickable()">
           <rect [attr.x]="b.bandX" [attr.y]="0" [attr.width]="b.bandW" [attr.height]="layout().base" class="band" />
           @if (b.h > 0) {
             <path [attr.d]="b.path" [class]="'bar s' + slot()" [class.dim]="highlight() !== null && highlight() !== b.i" />
@@ -94,6 +94,9 @@ abstract class Responsive implements OnInit, OnDestroy {
       @let b = layout().bars[hover()!];
       <div class="tip" [style.left.px]="b.cx" [style.top.px]="b.y - 8">
         <b>{{ b.value }}</b> {{ unit() }}<br /><span>{{ b.title }}</span>
+        @if (clickable() && clickHint()) {
+          <br /><span class="hint">{{ clickHint() }}</span>
+        }
       </div>
     }
   `,
@@ -105,6 +108,7 @@ abstract class Responsive implements OnInit, OnDestroy {
     .tick { fill: var(--chart-ink); font-size: 11px; font-variant-numeric: tabular-nums; }
     .band { fill: transparent; }
     .hit { cursor: default; }
+    .hit.clickable { cursor: pointer; }
     .hit:hover .band { fill: var(--spt-row-hover); }
     .bar.s1 { fill: var(--chart-1); }
     .bar.s2 { fill: var(--chart-2); }
@@ -116,6 +120,7 @@ abstract class Responsive implements OnInit, OnDestroy {
       padding: 6px 8px; border-radius: 6px; font-size: 12px; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,.2);
     }
     .tip span { opacity: .8; }
+    .tip .hint { font-style: italic; }
   `,
 })
 export class ColumnChart extends Responsive {
@@ -125,6 +130,9 @@ export class ColumnChart extends Responsive {
   readonly unit = input('');
   readonly highlight = input<number | null>(null);
   readonly ariaLabel = input('Column chart');
+  /** bars open something (pointer cursor and a hint in the tooltip) */
+  readonly clickable = input(false);
+  readonly clickHint = input<string | null>('Click to open these rows in Query logs');
   readonly pick = output<number>();
   protected readonly hover = signal<number | null>(null);
 
@@ -346,7 +354,7 @@ export class LineChart extends Responsive {
   selector: 'app-stat-tile',
   imports: [MatIconModule, RouterLink],
   template: `
-    <a class="tile" [class.hero]="hero()" [routerLink]="link()" [queryParams]="query()" [class.static]="!link()">
+    <a class="tile" [class.hero]="hero()" [routerLink]="link()" [queryParams]="query()" [class.static]="!link()" [attr.title]="linkTitle()">
       <div class="top">
         @if (icon()) {
           <mat-icon>{{ icon() }}</mat-icon>
@@ -395,6 +403,8 @@ export class StatTile {
   readonly hint = input<string | null>();
   readonly link = input<string | unknown[] | null>(null);
   readonly query = input<Record<string, unknown> | null>(null);
+  /** tooltip saying where the tile leads, e.g. "Open these rows in Query logs" */
+  readonly linkTitle = input<string | null>(null);
   readonly hero = input(false);
 }
 

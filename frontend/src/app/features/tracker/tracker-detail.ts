@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule, NgForm } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -10,23 +10,29 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterLink } from '@angular/router';
 import { Api } from '../../core/api';
 import { LookupStore } from '../../core/lookups';
 import {
+  AgentInfo,
   AuditEvent,
   CustomField,
   Iteration,
   Journey,
   PRIORITIES,
+  SqlDiagnostic,
+  TableDdl,
   REQUEST_SOURCES,
   Tracker,
   WORKFLOW_STATUSES,
+  WorkflowStatus,
 } from '../../core/models';
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { minutesText, num, secondsText } from '../../shared/dates';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
+import { CaptureStatusBanner } from '../../shared/capture-status';
 import { deltaText } from '../../shared/grid';
 import { JourneyView } from '../../shared/journey';
 import { SqlBlock } from '../../shared/sql-block';
@@ -53,6 +59,25 @@ interface MetricRow {
   /** lower is better */
   lower: boolean;
 }
+
+/** Tabs in the order the work progresses: overview -> triage -> diagnostics -> tune & test -> compare -> results. */
+const TAB = { overview: 0, tracking: 1, diagnostics: 2, iterations: 3, compare: 4, results: 5, logRows: 6, history: 7 } as const;
+
+/** How often an item whose diagnostics are still being fetched is re-read. */
+const CAPTURE_POLL_MS = 2500;
+
+/** The tab an item opens on: where its current stage's work happens. */
+const STAGE_TAB: Record<WorkflowStatus, number> = {
+  NEW: TAB.tracking,
+  DIAGNOSTICS_CAPTURED: TAB.diagnostics,
+  OPTIMIZATION_REQUESTED: TAB.iterations,
+  OPTIMIZED: TAB.iterations,
+  POST_RUN_VALIDATED: TAB.iterations,
+  SME_VALIDATION: TAB.compare,
+  ADOPTED: TAB.results,
+  REJECTED: TAB.results,
+  ON_HOLD: TAB.results,
+};
 
 /** Dropdown-backed tracker fields: property -> lookup category + label. */
 const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
@@ -82,8 +107,10 @@ const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
     MatButtonModule,
     MatIconModule,
     MatTooltipModule,
+    MatProgressSpinnerModule,
     SqlBlock,
     SqlDiff,
+    CaptureStatusBanner,
     StatusChip,
     GroupMembers,
     JourneyView,
@@ -98,6 +125,7 @@ export class TrackerDetail implements OnInit {
   private readonly api = inject(Api);
   private readonly snack = inject(MatSnackBar);
   private readonly dialog = inject(MatDialog);
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly lookups = inject(LookupStore);
 
   protected readonly statuses = WORKFLOW_STATUSES;
@@ -123,8 +151,31 @@ export class TrackerDetail implements OnInit {
   protected readonly iterations = signal<Iteration[]>([]);
   protected readonly history = signal<AuditEvent[]>([]);
   protected readonly customFields = signal<CustomField[]>([]);
+  protected readonly diagnostics = signal<SqlDiagnostic[]>([]);
+  protected readonly ddls = signal<TableDdl[]>([]);
+  /** latest captured diagnostic of the original SQL */
+  protected readonly originalDiag = computed(
+    () => this.diagnostics().find((d) => d.phase === 'ORIGINAL' && d.status === 'CAPTURED') ?? null,
+  );
+  /** explain / profile / DDL still being fetched in the background */
+  protected readonly captureBusy = computed(() => {
+    const s = this.saved()?.captureStatus;
+    return s === 'PENDING' || s === 'RUNNING';
+  });
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** the optimization agent; an automatic one (LLM endpoint / mock) can be asked from here */
+  protected readonly agent = signal<AgentInfo | null>(null);
+  /** run the agent is answering (a new iteration appears when it does) */
+  protected readonly agentRunId = signal<number | null>(null);
+  /** iteration whose test run is in progress */
+  protected readonly testing = signal<number | null>(null);
+  private agentTimer: ReturnType<typeof setTimeout> | null = null;
   protected readonly saving = signal(false);
-  protected readonly tab = signal(0);
+  protected readonly TAB = TAB;
+  protected readonly tab = signal<number>(TAB.tracking);
+  /** the first load opens the tab of the item's current stage; later reloads keep the user's tab */
+  private stageTabChosen = false;
   /** working copy bound to the form (fields mutated in place by ngModel) */
   protected readonly model = signal<Tracker | null>(null);
 
@@ -204,13 +255,15 @@ export class TrackerDetail implements OnInit {
     const best = this.best();
     switch (t.workflowStatus) {
       case 'NEW':
-        return 'Analyse the SQL: set a theme and capture the explain plan / profile of the original run on the group page.';
+        return t.captureStatus === 'PENDING' || t.captureStatus === 'RUNNING'
+          ? 'Triage while the explain plan, profile and DDL are fetched: set priority, theme and owners on the Tracking tab.'
+          : 'Analyse the SQL: set a theme and capture the explain plan / profile of the original run on the group page.';
       case 'DIAGNOSTICS_CAPTURED':
-        return 'Run the optimization agent on the group page or add a manual iteration with the rewritten SQL.';
+        return 'Review the diagnostics, then run the optimization agent (Iterations tab) or add a manual iteration with the rewritten SQL.';
       case 'OPTIMIZATION_REQUESTED':
-        return 'Waiting for a candidate SQL: paste the agent answer or add a manual iteration.';
+        return 'Waiting for a candidate SQL from the AI agent (or paste its answer / add a manual iteration).';
       case 'OPTIMIZED':
-        return 'Test the candidate iteration(s): capture the post-run profile or enter the test results.';
+        return 'Test the candidate iteration(s): run the test (flask icon on the Iterations tab), or capture the post-run profile / enter the results by hand. Run the agent again for more variants.';
       case 'POST_RUN_VALIDATED':
         return best
           ? `Iteration #${best.iterationNo} is the best so far (${best.durationImprovementPct ?? '—'}% faster). Select it for adoption.`
@@ -229,6 +282,11 @@ export class TrackerDetail implements OnInit {
   ngOnInit(): void {
     this.load();
     this.api.customFields('TRACKER').subscribe((f) => this.customFields.set(f.filter((x) => x.active)));
+    this.destroyRef.onDestroy(() => {
+      this.stopPolling();
+      if (this.agentTimer) clearTimeout(this.agentTimer);
+    });
+    this.api.agent().subscribe((a) => this.agent.set(a));
   }
 
   load(): void {
@@ -236,10 +294,90 @@ export class TrackerDetail implements OnInit {
     this.api.tracker(id).subscribe((t) => {
       this.saved.set(t);
       this.model.set(this.copy(t));
+      if (!this.stageTabChosen) {
+        this.stageTabChosen = true;
+        this.tab.set(STAGE_TAB[t.workflowStatus] ?? TAB.overview);
+      }
+      this.loadDiagnostics(t.groupId);
+      this.pollWhileCapturing(t);
     });
     this.api.journey(id).subscribe((j) => this.journey.set(j));
     this.api.iterations(id).subscribe((i) => this.iterations.set(i));
     this.api.trackerHistory(id).subscribe((h) => this.history.set(h));
+  }
+
+  private loadDiagnostics(groupId: number): void {
+    this.api.diagnostics(groupId).subscribe((d) => this.diagnostics.set(d));
+    this.api.ddls(groupId).subscribe((d) => this.ddls.set(d));
+  }
+
+  // ------------------------------------------------------------------ automatic diagnostics capture
+
+  /** Fetch explain plan, profile and DDL again (after a failure, or to refresh them). */
+  recapture(): void {
+    const t = this.saved();
+    if (!t) return;
+    this.api.recapture(t.trackerId).subscribe((u) => {
+      this.saved.set({ ...t, captureStatus: u.captureStatus, captureRequestedAt: u.captureRequestedAt, captureMessage: null });
+      this.pollWhileCapturing(u);
+    });
+  }
+
+  /** While the capture runs, re-read the item; when it ends, bring in what it filled without losing unsaved edits. */
+  private pollWhileCapturing(t: Tracker): void {
+    this.stopPolling();
+    if (t.captureStatus !== 'PENDING' && t.captureStatus !== 'RUNNING') return;
+    this.pollTimer = setTimeout(() => {
+      this.api.tracker(t.trackerId).subscribe((fresh) => {
+        const before = this.saved();
+        if (!before) return;
+        if (fresh.captureStatus === 'PENDING' || fresh.captureStatus === 'RUNNING') {
+          this.saved.set({ ...before, captureStatus: fresh.captureStatus, captureRequestedAt: fresh.captureRequestedAt });
+          this.pollWhileCapturing(fresh);
+          return;
+        }
+        this.merge(before, fresh);
+        this.loadDiagnostics(fresh.groupId);
+        this.api.journey(fresh.trackerId).subscribe((j) => this.journey.set(j));
+        this.api.trackerHistory(fresh.trackerId).subscribe((h) => this.history.set(h));
+        if (fresh.captureStatus === 'DONE') {
+          this.snack.open('Diagnostics captured: explain plan, profile and DDL are in', 'Show', { duration: 5000 })
+            .onAction()
+            .subscribe(() => this.tab.set(TAB.diagnostics));
+        }
+      });
+    }, CAPTURE_POLL_MS);
+  }
+
+  /**
+   * Three-way merge into the form: fields the user has not touched take the server's new values (metrics, stage),
+   * fields the user changed keep the user's value; the version moves on so the next save is not a conflict.
+   */
+  private merge(before: Tracker, fresh: Tracker): void {
+    const m = this.model();
+    this.saved.set(fresh);
+    if (!m) {
+      this.model.set(this.copy(fresh));
+      return;
+    }
+    const mine = m as unknown as Record<string, unknown>;
+    const was = before as unknown as Record<string, unknown>;
+    const now = fresh as unknown as Record<string, unknown>;
+    for (const k of Object.keys(now)) {
+      if (k === 'customFields') continue;
+      if (JSON.stringify(mine[k]) === JSON.stringify(was[k])) mine[k] = now[k];
+    }
+    m.version = fresh.version;
+    this.model.set(m);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = null;
+  }
+
+  protected engineLabel(t: Tracker): string {
+    return t.sqlEngine === 'IMPALA' ? 'Impala' : t.sqlEngine;
   }
 
   // ------------------------------------------------------------------ tracking form
@@ -283,12 +421,69 @@ export class TrackerDetail implements OnInit {
     (m as unknown as Record<string, unknown>)[field] = v;
   }
 
+  // ------------------------------------------------------------------ AI agent and test runs
+
+  /** Sends the group's prompt (active template) to the agent; its answer becomes the next iteration. */
+  askAgent(): void {
+    const t = this.saved();
+    if (!t) return;
+    this.tab.set(TAB.iterations);
+    this.api.startRun(t.groupId).subscribe((run) => {
+      if (run.status !== 'PENDING') {
+        this.load();
+        return;
+      }
+      this.agentRunId.set(run.id);
+      this.waitForAgent(t.groupId, run.id);
+    });
+  }
+
+  private waitForAgent(groupId: number, runId: number): void {
+    this.agentTimer = setTimeout(() => {
+      this.api.runs(groupId).subscribe((runs) => {
+        const run = runs.find((r) => r.id === runId);
+        if (run?.status === 'PENDING') {
+          this.waitForAgent(groupId, runId);
+          return;
+        }
+        this.agentRunId.set(null);
+        this.load();
+        this.snack.open(
+          run?.status === 'COMPLETED' ? 'The optimization agent proposed a new iteration: test it to compare' : `The agent failed: ${run?.errorMessage ?? 'no answer'}`,
+          undefined,
+          { duration: 5000 },
+        );
+      });
+    }, 2000);
+  }
+
+  /** Runs the iteration's SQL on the engine (mock Impala for now) and records run time, CPU, rows and the result check. */
+  runTest(i: Iteration): void {
+    const t = this.saved();
+    if (!t || this.testing()) return;
+    this.testing.set(i.id);
+    this.api.testIteration(t.trackerId, i.id).subscribe({
+      next: (its) => {
+        this.testing.set(null);
+        this.iterations.set(its);
+        this.load();
+        const r = its.find((x) => x.id === i.id);
+        if (r) {
+          const gain = r.durationImprovementPct === null ? '' : ` (${r.durationImprovementPct}% faster)`;
+          const check = r.resultMatches === false ? ' · results differ from the original' : ' · results match';
+          this.snack.open(`Iteration #${r.iterationNo}: ${minutesText(r.runDurationMinutes)}${gain}${check}`, undefined, { duration: 5000 });
+        }
+      },
+      error: () => this.testing.set(null),
+    });
+  }
+
   // ------------------------------------------------------------------ iterations
 
   compareWith(i: Iteration): void {
     this.compareLeft.set('original');
     this.compareRight.set('it:' + i.id);
-    this.tab.set(2);
+    this.tab.set(TAB.compare);
   }
 
   swapCompare(): void {
@@ -303,7 +498,7 @@ export class TrackerDetail implements OnInit {
   }
 
   startNewIteration(): void {
-    this.tab.set(1);
+    this.tab.set(TAB.iterations);
     this.newIteration = { optimizedSql: '', changeNarrative: '', notes: '' };
   }
 

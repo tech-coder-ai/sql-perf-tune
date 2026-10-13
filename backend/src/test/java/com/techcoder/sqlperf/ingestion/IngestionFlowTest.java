@@ -20,7 +20,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /** End to end on a throw-away SQLite file: CSV -> logs -> groups -> tracker, including re-import. */
-@SpringBootTest
+@SpringBootTest(properties = "spt.diagnostics.auto-capture=false")
 class IngestionFlowTest {
 
     @TempDir

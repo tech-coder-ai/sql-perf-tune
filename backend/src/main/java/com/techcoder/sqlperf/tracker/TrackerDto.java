@@ -86,6 +86,10 @@ public record TrackerDto(
         String createdBy,
         LocalDateTime updatedAt,
         String updatedBy,
+        TuningTracker.CaptureStatus captureStatus,
+        LocalDateTime captureRequestedAt,
+        LocalDateTime captureFinishedAt,
+        String captureMessage,
         int version,
         Map<String, String> customFields) {
 
@@ -118,7 +122,8 @@ public record TrackerDto(
                 t.getEnvironment(), t.getSelectedIterationId(), iterationCount, g.getFirstSeen(), g.getLastSeen(),
                 t.getStageChangedAt(), days(t.getStageChangedAt(), t.getClosedAt() != null ? t.getClosedAt() : now),
                 days(t.getCreatedAt(), openEnd), t.getAdoptedAt(), t.getClosedAt(), t.getCreatedAt(), t.getCreatedBy(),
-                t.getUpdatedAt(), t.getUpdatedBy(), t.getVersion(), custom == null ? Map.of() : custom);
+                t.getUpdatedAt(), t.getUpdatedBy(), t.getCaptureStatus(), t.getCaptureRequestedAt(),
+                t.getCaptureFinishedAt(), t.getCaptureMessage(), t.getVersion(), custom == null ? Map.of() : custom);
     }
 
     /** Run-time reduction in percent (positive = faster). */

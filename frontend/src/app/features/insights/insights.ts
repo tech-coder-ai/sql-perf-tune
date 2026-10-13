@@ -7,7 +7,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { Api } from '../../core/api';
 import {
@@ -22,6 +22,8 @@ import {
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, LineChart, Series, TableView } from '../../shared/charts';
 import { addDays, minutesText, num, pct, secondsText, signedPct, today } from '../../shared/dates';
+import { LogDrill, activeWindow, logsQuery, stageQuery, untrackedQuery } from '../../shared/drill';
+import { LoadingArea } from '../../shared/loading';
 import { StatusChip } from '../../shared/status-chip';
 
 interface Question {
@@ -43,6 +45,7 @@ type Preset = '7d' | '30d' | 'mtd' | '90d' | 'custom';
   imports: [
     FormsModule,
     RouterLink,
+    LoadingArea,
     MatButtonModule,
     MatButtonToggleModule,
     MatFormFieldModule,
@@ -61,6 +64,7 @@ type Preset = '7d' | '30d' | 'mtd' | '90d' | 'custom';
 })
 export class Insights {
   private readonly api = inject(Api);
+  private readonly router = inject(Router);
   protected readonly num = num;
   protected readonly minutesText = minutesText;
   protected readonly secondsText = secondsText;
@@ -132,6 +136,7 @@ export class Insights {
   }
 
   loadAll(): void {
+    const seq = ++this.loadSeq;
     this.loading.set(true);
     forkJoin({
       daily: this.api.daily(this.day()),
@@ -142,6 +147,7 @@ export class Insights {
       trends: this.api.trends(this.months),
     }).subscribe({
       next: (r) => {
+        if (seq !== this.loadSeq) return; // a newer day / period was asked for meanwhile
         this.daily.set(r.daily);
         this.pipeline.set(r.pipeline);
         this.savings.set(r.savings);
@@ -150,9 +156,12 @@ export class Insights {
         this.trends.set(r.trends);
         this.loading.set(false);
       },
-      error: () => this.loading.set(false),
+      error: () => seq === this.loadSeq && this.loading.set(false),
     });
   }
+
+  /** id of the latest load; responses of older loads are dropped */
+  private loadSeq = 0;
 
   setPreset(p: Preset): void {
     this.preset = p;
@@ -186,11 +195,26 @@ export class Insights {
     const delta = signedPct(d.badQueries, d.badQueriesPreviousDay);
     return `${num(d.badQueries)} bad queries on ${d.date}${delta ? ' (' + delta + ')' : ''}, ${minutesText(d.totalMinutes)} of run time.`;
   }
+  /** Query parameters of the Query logs screen showing the rows behind a number. */
+  protected logs(d: LogDrill): Record<string, unknown> {
+    return logsQuery(d);
+  }
+
+  protected openLogs(d: LogDrill): void {
+    this.router.navigate(['/logs'], { queryParams: logsQuery(d) });
+  }
+
+  /** Q2 bars: recurring / new rows of the day in Query logs; patterns run more than once: the Query groups screen. */
+  protected openQ2(d: DailyInsight, r: BarRow): void {
+    if (r.key === 'GROUPS') this.router.navigate(['/groups']);
+    else this.openLogs({ day: d.date, pattern: r.key as 'RECURRING' | 'NEW' });
+  }
+
   protected q2Rows(d: DailyInsight): BarRow[] {
     return [
-      { label: 'Recurring queries', value: d.recurringQueries, sub: `${d.recurringPatterns} patterns seen on earlier days` },
-      { label: 'Queries of new patterns', value: d.badQueries - d.recurringQueries, sub: `${d.newPatterns} patterns first seen this day` },
-      { label: 'Patterns run more than once this day', value: d.repeatedTodayPatterns },
+      { label: 'Recurring queries', value: d.recurringQueries, sub: `${d.recurringPatterns} patterns seen on earlier days`, key: 'RECURRING' },
+      { label: 'Queries of new patterns', value: d.badQueries - d.recurringQueries, sub: `${d.newPatterns} patterns first seen this day`, key: 'NEW' },
+      { label: 'Patterns run more than once this day', value: d.repeatedTodayPatterns, key: 'GROUPS' },
     ];
   }
   protected readonly q3Buckets = computed(() =>
@@ -229,13 +253,28 @@ export class Insights {
   }
 
   // ------------------------------------------------------------------ Q6, Q12, Q9
+  /** Q6 bars open the patterns they count (all within the active window of the bar). */
+  protected openQ6(p: PipelineInsight, r: BarRow): void {
+    const w = activeWindow(p.outstanding.asOf, p.outstanding.activeDays);
+    if (r.key === 'UNTRACKED') {
+      this.router.navigate(['/groups'], { queryParams: untrackedQuery(w) });
+      return;
+    }
+    const stages: Record<string, string[]> = {
+      IN_PROGRESS: ['NEW', 'DIAGNOSTICS_CAPTURED', 'OPTIMIZATION_REQUESTED', 'OPTIMIZED', 'POST_RUN_VALIDATED'],
+      AWAITING: ['SME_VALIDATION'],
+      PARKED: ['ON_HOLD', 'REJECTED'],
+    };
+    this.router.navigate(['/tracker'], { queryParams: stageQuery(stages[String(r.key)], w) });
+  }
+
   protected q6Rows(p: PipelineInsight): BarRow[] {
     const o = p.outstanding;
     return [
-      { label: 'Not tracked yet', value: o.untrackedPatterns },
-      { label: 'In progress', value: o.inProgressPatterns, sub: 'triage to tested' },
-      { label: 'Awaiting adoption', value: o.awaitingAdoptionPatterns },
-      { label: 'On hold / rejected', value: o.onHoldOrRejectedPatterns },
+      { label: 'Not tracked yet', value: o.untrackedPatterns, key: 'UNTRACKED' },
+      { label: 'In progress', value: o.inProgressPatterns, sub: 'triage to tested', key: 'IN_PROGRESS' },
+      { label: 'Awaiting adoption', value: o.awaitingAdoptionPatterns, key: 'AWAITING' },
+      { label: 'On hold / rejected', value: o.onHoldOrRejectedPatterns, key: 'PARKED' },
     ];
   }
   protected q12Rows(): BarRow[] {
@@ -257,6 +296,7 @@ export class Insights {
   // ------------------------------------------------------------------ Q7, Q13
   protected q7GroupRows(u: UsersInsight): BarRow[] {
     return u.groups.slice(0, 10).map((g) => ({
+      key: g.userGroup,
       label: g.userGroup,
       value: g.badQueries,
       sub: `${g.users} users · ${g.patterns} patterns`,
@@ -265,6 +305,7 @@ export class Insights {
   }
   protected q7UserRows(u: UsersInsight): BarRow[] {
     return u.users.slice(0, 10).map((x) => ({
+      key: x.userId,
       label: x.displayName ? `${x.displayName} (${x.userId})` : x.userId,
       value: x.badQueries,
       sub: x.userGroup ?? 'no user group',

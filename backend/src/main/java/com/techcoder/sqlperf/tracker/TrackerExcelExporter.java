@@ -27,6 +27,10 @@ public class TrackerExcelExporter {
     /** Excel's per-cell limit. */
     private static final int MAX_CELL = 32_767;
 
+    /** Internal fields; of the automatic capture only its status is exported. */
+    private static final java.util.Set<String> NOT_EXPORTED = java.util.Set.of("customFields", "version",
+            "captureRequestedAt", "captureFinishedAt", "captureMessage");
+
     private final CustomFieldService customFields;
 
     public TrackerExcelExporter(CustomFieldService customFields) {
@@ -37,7 +41,7 @@ public class TrackerExcelExporter {
         RecordComponent[] comps = TrackerDto.class.getRecordComponents();
         List<RecordComponent> cols = new ArrayList<>();
         for (RecordComponent rc : comps) {
-            if (!rc.getName().equals("customFields") && !rc.getName().equals("version")) {
+            if (!NOT_EXPORTED.contains(rc.getName())) {
                 cols.add(rc);
             }
         }

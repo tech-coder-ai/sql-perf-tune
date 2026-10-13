@@ -14,7 +14,9 @@ public record SptProperties(
         @DefaultValue Fingerprint fingerprint,
         @DefaultValue Ingestion ingestion,
         @DefaultValue Cors cors,
-        @DefaultValue Ui ui) {
+        @DefaultValue Ui ui,
+        @DefaultValue Diagnostics diagnostics,
+        @DefaultValue Agent agent) {
 
     public enum SecurityMode { NONE, JWT }
 
@@ -60,6 +62,47 @@ public record SptProperties(
      */
     public record Ui(@DefaultValue("") String agGridLicenseKey) {
     }
+
+    /**
+     * Automatic capture of explain plan, profile and table DDL when a group is put on the tracker.
+     *
+     * @param autoCapture     start the capture for every newly tracked group
+     * @param client          MOCK: generated, Impala-shaped diagnostics (until the Impala client is wired in)
+     * @param mockDelayMillis how long the mock client takes, so the "in progress" state can be seen
+     * @param threads         captures running at the same time
+     */
+    public record Diagnostics(
+            @DefaultValue("true") boolean autoCapture,
+            @DefaultValue("MOCK") DiagnosticsClient client,
+            @DefaultValue("4000") long mockDelayMillis,
+            @DefaultValue("2") int threads) {
+    }
+
+    public enum DiagnosticsClient { MOCK }
+
+    /**
+     * The optimization agent (LLM) of step 8.
+     *
+     * @param mode            HTTP: POST the prompt to {@code endpointUrl} and store the answer;
+     *                        MANUAL: the analyst runs the prompt elsewhere and pastes the answer
+     * @param endpointUrl     the LLM endpoint; empty = this server's built-in mock ({@code /api/mock-llm/v1/optimize})
+     * @param model           model name recorded on each run and sent to the endpoint
+     * @param authorization   value of the Authorization header sent to the endpoint (e.g. "Bearer ..."); empty = none
+     * @param timeoutSeconds  how long to wait for an answer
+     * @param mockEndpoint    serve the built-in mock endpoint (development; off in prod)
+     * @param mockDelayMillis how long the mock takes to answer
+     */
+    public record Agent(
+            @DefaultValue("HTTP") AgentMode mode,
+            @DefaultValue("") String endpointUrl,
+            @DefaultValue("mock-llm") String model,
+            @DefaultValue("") String authorization,
+            @DefaultValue("180") int timeoutSeconds,
+            @DefaultValue("true") boolean mockEndpoint,
+            @DefaultValue("5000") long mockDelayMillis) {
+    }
+
+    public enum AgentMode { HTTP, MANUAL }
 
     public record Cors(@DefaultValue("http://localhost:4200") List<String> allowedOrigins) {
     }

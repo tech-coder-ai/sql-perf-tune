@@ -6,6 +6,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AgGridAngular } from 'ag-grid-angular';
@@ -17,7 +18,8 @@ import {
   serverGridOptions,
   minutesFormatter,
   numCol,
-  pagedDatasource,
+  groupingDatasource,
+  isGroupRow,
   sqlCol,
   tsFormatter,
   errorCellRules,
@@ -36,6 +38,10 @@ interface LogFilter {
   reloadedOnly: boolean;
   groupId: number | null;
   batchId: number | null;
+  /** exact user (dashboard links); userId above is a "contains" search */
+  user: string | null;
+  userGroup: string | null;
+  pattern: 'RECURRING' | 'NEW' | null;
 }
 
 const EMPTY: LogFilter = {
@@ -49,7 +55,16 @@ const EMPTY: LogFilter = {
   reloadedOnly: false,
   groupId: null,
   batchId: null,
+  user: null,
+  userGroup: null,
+  pattern: null,
 };
+
+/** A filter that came with the link (shown as a removable chip). */
+interface LinkFilter {
+  key: 'user' | 'userGroup' | 'pattern' | 'groupId' | 'batchId';
+  label: string;
+}
 
 @Component({
   selector: 'app-logs',
@@ -62,6 +77,7 @@ const EMPTY: LogFilter = {
     MatButtonModule,
     MatIconModule,
     MatTooltipModule,
+    MatChipsModule,
   ],
   templateUrl: './logs.html',
 })
@@ -74,6 +90,8 @@ export class Logs implements OnInit {
 
   readonly total = signal(0);
   filter: LogFilter = { ...EMPTY };
+  /** filters set by the link that opened the screen (from the Command center, Insights, a group, an import) */
+  readonly linkFilters = signal<LinkFilter[]>([]);
 
   readonly gridOptions: GridOptions<QueryLog> = serverGridOptions<QueryLog>(50);
 
@@ -93,9 +111,25 @@ export class Logs implements OnInit {
     },
     { field: 'createdAt', headerName: 'First loaded', sortable: true, width: 170, valueFormatter: tsFormatter, hide: true },
     { field: 'lastSeenAt', headerName: 'Last seen', sortable: true, width: 170, valueFormatter: tsFormatter },
-    { field: 'userId', headerName: 'User', sortable: true, width: 120 },
-    { field: 'errorCode', headerName: 'Error code', sortable: true, width: 215, cellClassRules: errorCellRules },
-    { field: 'errorCategory', headerName: 'Error category', sortable: true, width: 140, cellClassRules: errorCellRules },
+    {
+      colId: 'startDay',
+      headerName: 'Start day',
+      headerTooltip: 'Day of the start time (load time when there is none); group by it to see the rows per day',
+      valueGetter: (p) => (p.data as Record<string, unknown> | undefined)?.['startDay'] ?? (p.data?.startTime ?? p.data?.createdAt ?? '').substring(0, 10),
+      width: 120,
+      hide: true,
+      enableRowGroup: true,
+    },
+    { field: 'userId', headerName: 'User', sortable: true, width: 120, enableRowGroup: true },
+    { field: 'errorCode', headerName: 'Error code', sortable: true, width: 215, cellClassRules: errorCellRules, enableRowGroup: true },
+    {
+      field: 'errorCategory',
+      headerName: 'Error category',
+      sortable: true,
+      width: 140,
+      cellClassRules: errorCellRules,
+      enableRowGroup: true,
+    },
     { field: 'errorMessage', headerName: 'Error message', width: 240, tooltip: (p) => p.data?.errorMessage, cellClassRules: errorCellRules },
     { headerName: 'Executed query', valueGetter: (p) => p.data?.executedQuery || p.data?.userQuery, ...sqlCol, flex: 1, minWidth: 320 },
     {
@@ -103,41 +137,85 @@ export class Logs implements OnInit {
       headerName: 'Group',
       sortable: true,
       width: 95,
+      enableRowGroup: true,
       cellRenderer: LinkCell,
       cellRendererParams: { link: (r: QueryLog) => (r.groupId ? ['/groups', r.groupId] : null), text: (r: QueryLog) => '#' + r.groupId, tooltip: 'Drill up to group' },
     },
-    { field: 'batchId', headerName: 'Import', sortable: true, width: 95, hide: true, ...numCol },
+    { field: 'batchId', headerName: 'Import', sortable: true, width: 95, hide: true, enableRowGroup: true, ...numCol },
   ];
 
   ngOnInit(): void {
-    const qp = this.route.snapshot.queryParamMap;
-    this.filter.groupId = qp.get('groupId') ? Number(qp.get('groupId')) : null;
-    this.filter.batchId = qp.get('batchId') ? Number(qp.get('batchId')) : null;
-    this.filter.userId = qp.get('userId') ?? '';
+    // links from the dashboards (and from groups / imports) carry their filters in the URL
+    this.route.queryParamMap.subscribe((qp) => {
+      const num = (k: string) => (qp.get(k) ? Number(qp.get(k)) : null);
+      const pattern = qp.get('pattern')?.toUpperCase();
+      this.filter = {
+        ...EMPTY,
+        groupId: num('groupId'),
+        batchId: num('batchId'),
+        userId: qp.get('userId') ?? '',
+        user: qp.get('user'),
+        userGroup: qp.get('userGroup'),
+        pattern: pattern === 'RECURRING' || pattern === 'NEW' ? pattern : null,
+        from: qp.get('from') ?? '',
+        to: qp.get('to') ?? '',
+        errorsOnly: qp.get('errorsOnly') === 'true',
+      };
+      this.linkFilters.set(this.describeLinkFilters());
+      if (this.grid) this.search();
+    });
+  }
+
+  private describeLinkFilters(): LinkFilter[] {
+    const f = this.filter;
+    const out: LinkFilter[] = [];
+    if (f.user) out.push({ key: 'user', label: `User is ${f.user}` });
+    if (f.userGroup) out.push({ key: 'userGroup', label: `User group: ${f.userGroup}` });
+    if (f.pattern) {
+      out.push({
+        key: 'pattern',
+        label: f.pattern === 'RECURRING' ? 'Recurring patterns (seen before this day)' : 'New patterns (first seen this day)',
+      });
+    }
+    if (f.groupId) out.push({ key: 'groupId', label: `Group #${f.groupId}` });
+    if (f.batchId) out.push({ key: 'batchId', label: `Import #${f.batchId}` });
+    return out;
+  }
+
+  /** Removes one of the link's filters. */
+  dropLinkFilter(key: LinkFilter['key']): void {
+    this.filter = { ...this.filter, [key]: null };
+    this.linkFilters.set(this.describeLinkFilters());
+    this.search();
+  }
+
+  private params(): Record<string, unknown> {
+    const f = this.filter;
+    return {
+      q: f.q,
+      userId: f.userId,
+      user: f.user,
+      userGroup: f.userGroup,
+      pattern: f.pattern && f.from ? f.pattern : null,
+      errorCategory: f.errorCategory,
+      from: f.from ? f.from + ':00' : null,
+      to: f.to ? f.to + ':59' : null,
+      minDuration: f.minDuration,
+      errorsOnly: f.errorsOnly || null,
+      reloadedOnly: f.reloadedOnly || null,
+      groupId: f.groupId,
+      batchId: f.batchId,
+    };
   }
 
   onReady(e: GridReadyEvent<QueryLog>): void {
     this.grid = e.api;
     e.api.setGridOption(
       'serverSideDatasource',
-      pagedDatasource(
-        (page, size, sort) => {
-          const f = this.filter;
-          return this.api.logs({
-            page,
-            size,
-            sort,
-            q: f.q,
-            userId: f.userId,
-            errorCategory: f.errorCategory,
-            from: f.from ? f.from + ':00' : null,
-            to: f.to ? f.to + ':59' : null,
-            minDuration: f.minDuration,
-            errorsOnly: f.errorsOnly || null,
-            reloadedOnly: f.reloadedOnly || null,
-            groupId: f.groupId,
-            batchId: f.batchId,
-          });
+      groupingDatasource<QueryLog>(
+        {
+          rows: (page, size, sort, gk) => this.api.logs({ page, size, sort, gk, ...this.params() }),
+          buckets: (by, page, size, sort, gk) => this.api.buckets('logs', { by, page, size, sort, gk, ...this.params() }),
         },
         {},
         (total) => this.total.set(total),
@@ -152,12 +230,13 @@ export class Logs implements OnInit {
 
   reset(): void {
     this.filter = { ...EMPTY };
+    this.linkFilters.set([]);
     this.router.navigate([], { queryParams: {} });
     this.search();
   }
 
   open(e: RowClickedEvent<QueryLog>): void {
-    if (!e.data) return;
+    if (!e.data || isGroupRow(e.data)) return;
     this.dialog.open(LogDetailDialog, { data: e.data, width: '960px', maxWidth: '95vw' });
   }
 

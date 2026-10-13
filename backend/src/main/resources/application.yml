@@ -63,6 +63,24 @@ spt:
     # CONTENT (seq_id + user + times + SQL text) or SEQ_ID (seq_id only) decides "already loaded"
     row-identity: CONTENT
     jdbc-query-timeout-seconds: 600
+  diagnostics:
+    # fetch explain plan, profile and table DDL in the background as soon as a group is tracked
+    auto-capture: true
+    # MOCK = generated Impala-shaped output until the Impala client is wired in
+    client: MOCK
+    mock-delay-millis: 4000
+    threads: 2
+  agent:
+    # HTTP = send the prompt to the LLM endpoint below; MANUAL = run the prompt elsewhere and paste the answer
+    mode: ${SPT_LLM_MODE:HTTP}
+    # the LLM endpoint (contract: workflow/LlmApi.java); empty = this server's built-in mock /api/mock-llm/v1/optimize
+    endpoint-url: ${SPT_LLM_ENDPOINT_URL:}
+    model: ${SPT_LLM_MODEL:mock-llm}
+    # Authorization header for the endpoint, e.g. "Bearer <token>"; never commit it
+    authorization: ${SPT_LLM_AUTHORIZATION:}
+    timeout-seconds: 180
+    mock-endpoint: true
+    mock-delay-millis: 5000
   cors:
     allowed-origins: http://localhost:4200
   ui:

@@ -16,6 +16,12 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.transaction.annotation.Transactional;
+import com.techcoder.sqlperf.common.RowGrouping;
+import com.techcoder.sqlperf.log.ActiveWindow;
+import org.springframework.format.annotation.DateTimeFormat;
+import jakarta.persistence.EntityManager;
+import java.util.Map;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -45,11 +51,59 @@ public class TrackerController {
     private final TrackerService service;
     private final TrackerExcelExporter exporter;
     private final AuditService audit;
+    private final EntityManager em;
 
-    public TrackerController(TrackerService service, TrackerExcelExporter exporter, AuditService audit) {
+    public TrackerController(TrackerService service, TrackerExcelExporter exporter, AuditService audit, EntityManager em) {
+        this.em = em;
         this.service = service;
         this.exporter = exporter;
         this.audit = audit;
+    }
+
+    /** Columns the grid can group by (tracker fields; dropdown fields group by their value). */
+    static final Map<String, RowGrouping.Column<TuningTracker>> GROUPABLE = Map.ofEntries(
+            Map.entry("workflowStatus", RowGrouping.Column.enumOf("workflowStatus", TuningTracker.WorkflowStatus.class)),
+            Map.entry("priority", RowGrouping.Column.enumOf("priority", TuningTracker.Priority.class)),
+            Map.entry("requestSource", RowGrouping.Column.enumOf("requestSource", TuningTracker.RequestSource.class)),
+            Map.entry("captureStatus", RowGrouping.Column.enumOf("captureStatus", TuningTracker.CaptureStatus.class)),
+            Map.entry("sqlEngine", RowGrouping.Column.text("group.sqlEngine")),
+            Map.entry("theme", RowGrouping.Column.text("theme")),
+            Map.entry("environment", RowGrouping.Column.text("environment")),
+            Map.entry("requestedBy", RowGrouping.Column.text("requestedBy")),
+            Map.entry("devTeamLead", RowGrouping.Column.text("devTeamLead")),
+            Map.entry("devTeamStatus", RowGrouping.Column.text("devTeamStatus")),
+            Map.entry("clouderaTeamLead", RowGrouping.Column.text("clouderaTeamLead")),
+            Map.entry("smeTeamLead", RowGrouping.Column.text("smeTeamLead")),
+            Map.entry("optimizedSqlStatus", RowGrouping.Column.text("optimizedSqlStatus")),
+            Map.entry("clouderaPostRunValidation", RowGrouping.Column.text("clouderaPostRunValidation")),
+            Map.entry("smeValidation", RowGrouping.Column.text("smeValidation")),
+            Map.entry("installStatus", RowGrouping.Column.text("installStatus")),
+            Map.entry("executeStatus", RowGrouping.Column.text("executeStatus")),
+            Map.entry("validationStatus", RowGrouping.Column.text("validationStatus")));
+
+    /** Row grouping: distinct values of {@code by} with their item counts under the same filters. */
+    @GetMapping("/buckets")
+    @Transactional(readOnly = true)
+    public PageResponse<RowGrouping.Bucket> buckets(
+            @RequestParam String by,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) List<String> gk,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) List<TuningTracker.WorkflowStatus> status,
+            @RequestParam(required = false) TuningTracker.Priority priority,
+            @RequestParam(required = false) String theme,
+            @RequestParam(required = false) String lead,
+            @RequestParam(required = false) Long groupId,
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
+        var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource),
+                active(activeFrom, activeTo), RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
+        boolean byValue = sort != null && sort.startsWith(by + ",");
+        boolean desc = sort == null || !byValue || sort.endsWith(",desc");
+        return RowGrouping.buckets(em, TuningTracker.class, spec, GROUPABLE, by, byValue, desc, page, size);
     }
 
     @GetMapping
@@ -57,14 +111,18 @@ public class TrackerController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String sort,
+            @RequestParam(required = false) List<String> gk,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<TuningTracker.WorkflowStatus> status,
             @RequestParam(required = false) TuningTracker.Priority priority,
             @RequestParam(required = false) String theme,
             @RequestParam(required = false) String lead,
             @RequestParam(required = false) Long groupId,
-            @RequestParam(required = false) TuningTracker.RequestSource requestSource) {
-        var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource));
+            @RequestParam(required = false) TuningTracker.RequestSource requestSource,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
+        var spec = Specs.all(spec(q, status, priority, theme, lead, groupId), Specs.eq("requestSource", requestSource),
+                active(activeFrom, activeTo), RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
         var pageable = Paging.of(page, size, sort, SORTABLE,
                 Sort.by(Sort.Direction.DESC, "group.totalDurationMinutes").and(Sort.by("id")));
         var result = service.search(spec, pageable);
@@ -126,8 +184,12 @@ public class TrackerController {
             @RequestParam(required = false) List<TuningTracker.WorkflowStatus> status,
             @RequestParam(required = false) TuningTracker.Priority priority,
             @RequestParam(required = false) String theme,
-            @RequestParam(required = false) String lead) throws IOException {
-        List<TrackerDto> rows = service.searchAll(spec(q, status, priority, theme, lead, null),
+            @RequestParam(required = false) String lead,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo)
+            throws IOException {
+        List<TrackerDto> rows = service.searchAll(Specs.all(spec(q, status, priority, theme, lead, null),
+                        active(activeFrom, activeTo)),
                 Sort.by(Sort.Direction.DESC, "group.totalDurationMinutes").and(Sort.by("id")));
         if (rows.size() > EXPORT_LIMIT) {
             throw new IllegalArgumentException("Export limited to " + EXPORT_LIMIT + " rows; narrow the filter");
@@ -139,6 +201,12 @@ public class TrackerController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(name).build().toString())
                 .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(out.toByteArray());
+    }
+
+    /** Items whose pattern had bad queries between the two days (the dashboards' "active" window). */
+    private static Specification<TuningTracker> active(LocalDate from, LocalDate to) {
+        return from == null && to == null ? null
+                : (root, cq, cb) -> ActiveWindow.of(root.get("groupId"), from, to, cq, cb);
     }
 
     private static Specification<TuningTracker> spec(String q, List<TuningTracker.WorkflowStatus> status,

@@ -46,32 +46,37 @@
     </section>
 
     <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs" [selectedIndex]="tab()" (selectedIndexChange)="tab.set($event)">
-      <!-- ======================================================== OVERVIEW -->
+      <!-- ======================================================== 1. OVERVIEW -->
       <mat-tab label="Overview">
-        <div class="tab-body overview">
-          <div class="card compare">
-            <div class="card-title">Before / after</div>
-            <div class="card-sub">
-              Original run vs the
-              @if (selected(); as s) {
-                selected iteration #{{ s.iterationNo }}
-              } @else {
-                post-run values (no iteration selected yet)
-              }
+        <div class="tab-body">
+          <app-capture-status
+            [status]="t.captureStatus"
+            [requestedAt]="t.captureRequestedAt"
+            [finishedAt]="t.captureFinishedAt"
+            [message]="t.captureMessage"
+            [engine]="engineLabel(t)"
+            (retry)="recapture()"
+          />
+          <div class="overview">
+            <div class="card">
+              <div class="card-title">Where it stands</div>
+              <dl class="facts-list">
+                <dt>Stage</dt><dd><app-status [value]="t.workflowStatus" /><span class="muted">&nbsp; for {{ t.daysInStage ?? 0 }} days</span></dd>
+                <dt>Priority · theme</dt><dd>{{ t.priority }} · {{ t.theme ?? 'no theme yet' }}</dd>
+                <dt>Diagnostics</dt>
+                <dd>
+                  @switch (t.captureStatus) {
+                    @case ('DONE') { captured {{ t.captureFinishedAt | ts }} }
+                    @case ('FAILED') { <span class="bad">automatic capture failed</span> }
+                    @case (null) { {{ diagnostics().length ? 'captured on the group page' : 'not captured yet' }} }
+                    @default { <span class="info">being fetched…</span> }
+                  }
+                  · <a class="link" (click)="tab.set(TAB.diagnostics)">open</a>
+                </dd>
+                <dt>Iterations</dt><dd>{{ t.iterationCount }}@if (best(); as b) { · best #{{ b.iterationNo }} ({{ b.durationImprovementPct ?? '—' }}% faster)}</dd>
+                <dt>Original run</dt><dd>{{ t.ogRunDurationMinutes | minutes }}@if (t.postRunDurationMinutes !== null) { → {{ t.postRunDurationMinutes | minutes }}}</dd>
+              </dl>
             </div>
-            <table class="simple">
-              <tr><th>Metric</th><th class="num hdr-pre">Original</th><th class="num hdr-post">Post-implementation</th><th class="num hdr-delta">Δ %</th></tr>
-              @for (r of metrics(); track r.label) {
-                @let c = change(r);
-                <tr>
-                  <td>{{ r.label }}</td>
-                  <td class="num">{{ r.fmt(r.og) }}</td>
-                  <td class="num">{{ r.fmt(r.post) }}</td>
-                  <td class="num" [class.good]="c.good === true" [class.bad]="c.good === false">{{ c.text }}</td>
-                </tr>
-              }
-            </table>
-          </div>
           <div class="card facts">
             <div class="card-title">Facts</div>
             <dl>
@@ -93,216 +98,25 @@
               <p class="pre muted">{{ t.recommendations }}</p>
             }
           </div>
-        </div>
-      </mat-tab>
-
-      <!-- ======================================================== ITERATIONS -->
-      <mat-tab [label]="'Iterations (' + iterations().length + ')'">
-        <div class="tab-body">
-          <div class="iter-head">
-            <p class="muted">
-              Every tuning attempt with its test results. ★ marks the best: the fastest tested iteration whose results match the original.
-              Select it for adoption; if users reject it, try the next iteration.
-            </p>
-            <span class="spacer"></span>
-            <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
+            <div class="span-2">
+              <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="280px" />
+            </div>
           </div>
-
-          @if (newIteration) {
-            <div class="card new-iter">
-              <div class="card-title">New iteration</div>
-              <div class="form-grid">
-                <mat-form-field class="span-all">
-                  <mat-label>Optimized SQL</mat-label>
-                  <textarea matInput rows="8" class="mono" [(ngModel)]="newIteration.optimizedSql" required></textarea>
-                </mat-form-field>
-                <mat-form-field class="span-all">
-                  <mat-label>What changed and why</mat-label>
-                  <textarea matInput rows="3" [(ngModel)]="newIteration.changeNarrative"></textarea>
-                </mat-form-field>
-              </div>
-              <div class="actions">
-                <button mat-button (click)="newIteration = null">Cancel</button>
-                <button mat-flat-button (click)="addIteration()" [disabled]="!newIteration.optimizedSql"><mat-icon>add</mat-icon> Add iteration</button>
-              </div>
-            </div>
-          }
-
-          <div class="table-wrap">
-            <table class="simple iter-table">
-              <tr>
-                <th></th>
-                <th>#</th>
-                <th>Status</th>
-                <th class="num hdr-post">Run time</th>
-                <th class="num hdr-delta">Δ run %</th>
-                <th class="num hdr-post">CPU</th>
-                <th class="num hdr-delta">Δ CPU %</th>
-                <th class="num hdr-post">Rows scanned</th>
-                <th class="num hdr-delta">Δ rows %</th>
-                <th class="num hdr-post">Tables</th>
-                <th>Results match</th>
-                <th>Tested</th>
-                <th></th>
-              </tr>
-              <tr class="baseline">
-                <td></td>
-                <td>Original</td>
-                <td></td>
-                <td class="num">{{ t.ogRunDurationMinutes | minutes }}</td>
-                <td></td>
-                <td class="num">{{ t.ogCpuSeconds ?? '—' }}{{ t.ogCpuSeconds !== null ? ' s' : '' }}</td>
-                <td></td>
-                <td class="num">{{ num(t.ogRowsScanned) }}</td>
-                <td></td>
-                <td class="num">{{ t.ogTablesScanned ?? '—' }}</td>
-                <td colspan="3" class="muted">baseline: original run</td>
-              </tr>
-              @for (i of iterations(); track i.id) {
-                <tr [class.best-row]="i.best" [class.sel-row]="i.selected" [class.editing]="editing()?.id === i.id">
-                  <td class="star">
-                    @if (i.best) {
-                      <mat-icon matTooltip="Best iteration">star</mat-icon>
-                    }
-                  </td>
-                  <td>
-                    <b>#{{ i.iterationNo }}</b>
-                    <div class="muted small">{{ i.source === 'AI_AGENT' ? 'AI agent' : 'manual' }}</div>
-                  </td>
-                  <td><app-status [value]="i.status" /></td>
-                  <td class="num">{{ i.runDurationMinutes | minutes }}</td>
-                  @let dRun = negate(i.durationImprovementPct);
-                  @let dCpu = negate(i.cpuImprovementPct);
-                  @let dRows = deltaOf(t.ogRowsScanned, i.rowsScanned);
-                  <td class="num" [class.good]="(dRun ?? 0) < 0" [class.bad]="(dRun ?? 0) > 0">{{ deltaText(dRun) || '—' }}</td>
-                  <td class="num">{{ i.cpuSeconds ?? '—' }}{{ i.cpuSeconds !== null ? ' s' : '' }}</td>
-                  <td class="num" [class.good]="(dCpu ?? 0) < 0" [class.bad]="(dCpu ?? 0) > 0">{{ deltaText(dCpu) || '—' }}</td>
-                  <td class="num">{{ num(i.rowsScanned) }}</td>
-                  <td class="num" [class.good]="(dRows ?? 0) < 0" [class.bad]="(dRows ?? 0) > 0">{{ deltaText(dRows) || '—' }}</td>
-                  <td class="num">
-                    {{ i.tablesScanned ?? '—' }}
-                    @if ((i.tableScansAvoided ?? 0) > 0) {
-                      <span class="good small">(−{{ i.tableScansAvoided }})</span>
-                    }
-                  </td>
-                  <td>
-                    @if (i.resultMatches === true) {
-                      <mat-icon class="good" matTooltip="Same results as the original">check_circle</mat-icon>
-                    } @else if (i.resultMatches === false) {
-                      <mat-icon class="bad" matTooltip="Results differ">cancel</mat-icon>
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="small">{{ i.testedAt | ts }}</td>
-                  <td class="row-actions">
-                    <button mat-icon-button (click)="compareWith(i)" [disabled]="!i.optimizedSql" matTooltip="Compare with the original SQL" aria-label="Compare with the original SQL"><mat-icon>difference</mat-icon></button>
-                    <button mat-icon-button (click)="edit(i)" matTooltip="Open / enter test results" aria-label="Edit iteration"><mat-icon>edit</mat-icon></button>
-                    @if (i.status === 'TESTED' || i.status === 'PROPOSED') {
-                      <button mat-icon-button (click)="select(i)" matTooltip="Select for adoption" aria-label="Select for adoption"><mat-icon>how_to_reg</mat-icon></button>
-                    }
-                    @if (i.status !== 'REJECTED' && i.status !== 'ADOPTED') {
-                      <button mat-icon-button (click)="decide('REJECTED', i)" matTooltip="Reject with reason" aria-label="Reject iteration"><mat-icon>block</mat-icon></button>
-                    }
-                  </td>
-                </tr>
-              } @empty {
-                <tr><td colspan="12" class="muted">No iterations yet. Run the AI agent on the group page or add one manually.</td></tr>
-              }
-            </table>
-          </div>
-
-          @if (editing(); as e) {
-            <div class="card iter-edit">
-              <div class="card-title">Iteration #{{ e.iterationNo }} <app-status [value]="e.status" /></div>
-              <div class="grid-2">
-                <app-sql-block [text]="e.optimizedSql" label="Optimized SQL" maxHeight="320px" />
-                <div>
-                  <div class="card-sub">Change narrative</div>
-                  <p class="pre">{{ e.changeNarrative || '—' }}</p>
-                </div>
-              </div>
-              <div class="section-title">Test results</div>
-              <p class="muted small">
-                Filled automatically when a post-run profile is captured on the group page (Diagnostics → phase "Optimized");
-                or enter them here.
-              </p>
-              <div class="form-grid">
-                <mat-form-field><mat-label>Run duration (min)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.runDurationMinutes" /></mat-form-field>
-                <mat-form-field><mat-label>Execution time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.executionTimeSeconds" /></mat-form-field>
-                <mat-form-field><mat-label>Teardown time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.teardownTimeSeconds" /></mat-form-field>
-                <mat-form-field><mat-label>Impala CPU time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.cpuSeconds" /></mat-form-field>
-                <mat-form-field><mat-label>Rows scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.rowsScanned" /></mat-form-field>
-                <mat-form-field><mat-label>Tables scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.tablesScanned" /></mat-form-field>
-                <mat-form-field><mat-label>Peak memory (MB)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.peakMemoryMb" /></mat-form-field>
-                <mat-form-field><mat-label>Result row count</mat-label><input matInput type="number" min="0" [(ngModel)]="e.resultRowCount" /></mat-form-field>
-                <mat-form-field>
-                  <mat-label>Results match the original?</mat-label>
-                  <mat-select [(ngModel)]="e.resultMatches">
-                    <mat-option [value]="null">Not checked</mat-option>
-                    <mat-option [value]="true">Yes, identical</mat-option>
-                    <mat-option [value]="false">No, results differ</mat-option>
-                  </mat-select>
-                </mat-form-field>
-                <mat-form-field class="span-all"><mat-label>Notes</mat-label><textarea matInput rows="2" [(ngModel)]="e.notes"></textarea></mat-form-field>
-              </div>
-              <div class="actions">
-                <button mat-button (click)="editing.set(null)">Close</button>
-                <button mat-flat-button (click)="saveIteration()"><mat-icon>save</mat-icon> Save results</button>
-              </div>
-            </div>
-          }
         </div>
       </mat-tab>
 
-      <!-- ======================================================== COMPARE SQL -->
-      <mat-tab label="Compare SQL">
-        <div class="tab-body">
-          @if (compareOptions().length < 2) {
-            <div class="empty-state">
-              <mat-icon>difference</mat-icon>
-              <div>No optimized SQL yet. Add an iteration (or paste the agent's answer) to compare it with the original.</div>
-              <button mat-stroked-button (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
-            </div>
-          } @else {
-            <div class="compare-pick">
-              <mat-form-field subscriptSizing="dynamic">
-                <mat-label>Compare</mat-label>
-                <mat-select [value]="leftKey()" (selectionChange)="compareLeft.set($event.value)">
-                  @for (o of compareOptions(); track o.key) {
-                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
-                  }
-                </mat-select>
-              </mat-form-field>
-              <button mat-icon-button (click)="swapCompare()" matTooltip="Swap sides" aria-label="Swap sides"><mat-icon>swap_horiz</mat-icon></button>
-              <mat-form-field subscriptSizing="dynamic">
-                <mat-label>with</mat-label>
-                <mat-select [value]="rightKey()" (selectionChange)="compareRight.set($event.value)">
-                  @for (o of compareOptions(); track o.key) {
-                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
-                  }
-                </mat-select>
-              </mat-form-field>
-            </div>
-            <app-sql-diff
-              [left]="leftOption()?.sql"
-              [right]="rightOption()?.sql"
-              [leftLabel]="leftOption()?.label ?? ''"
-              [rightLabel]="rightOption()?.label ?? ''"
-            />
-            @if (rightOption()?.narrative; as n) {
-              <div class="card narrative">
-                <div class="card-title">What changed in {{ rightOption()?.short }}</div>
-                <pre>{{ n }}</pre>
-              </div>
-            }
-          }
-        </div>
-      </mat-tab>
-
-      <!-- ======================================================== TRACKING -->
+      <!-- ======================================================== 2. TRIAGE (tracking fields) -->
       <mat-tab label="Tracking">
         <form #f="ngForm" (ngSubmit)="save(f)" class="tab-body">
+          <app-capture-status
+            [status]="t.captureStatus"
+            [requestedAt]="t.captureRequestedAt"
+            [message]="t.captureMessage"
+            [engine]="engineLabel(t)"
+            [compact]="true"
+            consequence="You can triage now; the original-run metrics below fill in when it finishes (your unsaved changes are kept)."
+            (retry)="recapture()"
+          />
           <div class="save-bar" [class.dirty]="f.dirty">
             <span>{{ f.dirty ? 'Unsaved changes' : 'All changes saved' }} · version {{ m.version }}</span>
             <span class="spacer"></span>
@@ -457,18 +271,313 @@
         </form>
       </mat-tab>
 
-      <!-- ======================================================== QUERIES -->
-      <mat-tab label="Queries">
-        <div class="tab-body grid-2">
-          <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="480px" />
-          <app-sql-block [text]="t.optimizedQuery" label="Optimized query (selected iteration)" maxHeight="480px" placeholder="No iteration selected yet" />
-          @if (t.optimizedQuery) {
-            <div class="span-2">
-              <button mat-stroked-button (click)="tab.set(2)"><mat-icon>difference</mat-icon> Compare original vs optimized</button>
+      <!-- ======================================================== 3. DIAGNOSTICS -->
+      <mat-tab [label]="'Diagnostics' + (captureBusy() ? ' …' : '')">
+        <div class="tab-body">
+          <app-capture-status
+            [status]="t.captureStatus"
+            [requestedAt]="t.captureRequestedAt"
+            [finishedAt]="t.captureFinishedAt"
+            [message]="t.captureMessage"
+            [engine]="engineLabel(t)"
+            consequence="The explain plan, profile and DDL appear here when it finishes."
+            (retry)="recapture()"
+          />
+          <div class="diag-bar">
+            <span class="muted">Original run as captured: explain plan, query profile and the DDL of every table the SQL reads. They feed the optimization prompt.</span>
+            <a mat-stroked-button [routerLink]="['/groups', t.groupId]"><mat-icon>troubleshoot</mat-icon> Edit diagnostics · run the AI agent</a>
+          </div>
+          @if (originalDiag(); as d) {
+            <div class="grid-2">
+              <div class="card">
+                <div class="card-title">Original run</div>
+                <div class="card-sub">Captured {{ d.capturedAt | ts }} by {{ d.capturedBy ?? '—' }}@if (d.queryId) { · query id <span class="mono">{{ d.queryId }}</span>}</div>
+                <table class="simple">
+                  @for (r of metrics(); track r.label) {
+                    <tr><td>{{ r.label }}</td><td class="num">{{ r.fmt(r.og) }}</td></tr>
+                  }
+                  <tr><td>Rows returned</td><td class="num">{{ d.rowCount === null ? '—' : num(d.rowCount) }}</td></tr>
+                </table>
+              </div>
+              <app-sql-block [text]="d.execSummary" label="Exec summary" maxHeight="320px" placeholder="No exec summary" [wrap]="false" />
+              <div class="span-2"><app-sql-block [text]="d.explainPlan" label="Explain plan" maxHeight="420px" placeholder="No explain plan" [wrap]="false" /></div>
+            </div>
+          } @else if (!captureBusy()) {
+            <p class="muted">No diagnostics for the original run yet.</p>
+          }
+          @if (ddls().length) {
+            <div class="section-title">Tables read ({{ ddls().length }})</div>
+            <div class="grid-2">
+              @for (x of ddls(); track x.id) {
+                <app-sql-block [text]="x.ddlText" [label]="x.tableName + (x.rowCount !== null ? ' · ' + num(x.rowCount) + ' rows' : '')" maxHeight="260px" />
+              }
             </div>
           }
-          <app-sql-block [text]="t.cleansedQuery" label="Cleansed query" maxHeight="240px" />
+          <div class="section-title">SQL</div>
+          <div class="grid-2">
+            <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="360px" />
+            <app-sql-block [text]="t.cleansedQuery" label="Cleansed query" maxHeight="360px" />
+          </div>
           <div class="muted mono small">fingerprint {{ t.fingerprint }}<br />row indices {{ t.rowIndices }}</div>
+        </div>
+      </mat-tab>
+
+      <!-- ======================================================== 4. ITERATIONS (tune and test) -->
+      <mat-tab [label]="'Iterations (' + iterations().length + ')'">
+        <div class="tab-body">
+          <div class="iter-head">
+            <p class="muted">
+              Every tuning attempt with its test results. ★ marks the best: the fastest tested iteration whose results match the original.
+              Select it for adoption; if users reject it, try the next iteration.
+            </p>
+            <span class="spacer"></span>
+            @if (agent()?.automatic) {
+              <button mat-flat-button class="nowrap" (click)="askAgent()" [disabled]="agentRunId() !== null" matTooltip="Send the prompt (active template) to the optimization agent; its answer becomes the next iteration">
+                @if (agentRunId() !== null) {
+                  <mat-spinner diameter="18" class="btn-spinner" />
+                } @else {
+                  <mat-icon>auto_awesome</mat-icon>
+                }
+                Run optimization agent
+              </button>
+            }
+            <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
+          </div>
+          @if (agentRunId(); as runId) {
+            <div class="agent-wait" role="status">
+              <mat-spinner diameter="22" />
+              <span>
+                <b>Waiting for the optimization agent…</b> Run #{{ runId }}: the prompt with the SQL, explain plan, profile and DDL was sent.
+                Its rewrite appears below as the next iteration.
+              </span>
+            </div>
+          }
+
+          @if (newIteration) {
+            <div class="card new-iter">
+              <div class="card-title">New iteration</div>
+              <div class="form-grid">
+                <mat-form-field class="span-all">
+                  <mat-label>Optimized SQL</mat-label>
+                  <textarea matInput rows="8" class="mono" [(ngModel)]="newIteration.optimizedSql" required></textarea>
+                </mat-form-field>
+                <mat-form-field class="span-all">
+                  <mat-label>What changed and why</mat-label>
+                  <textarea matInput rows="3" [(ngModel)]="newIteration.changeNarrative"></textarea>
+                </mat-form-field>
+              </div>
+              <div class="actions">
+                <button mat-button (click)="newIteration = null">Cancel</button>
+                <button mat-flat-button (click)="addIteration()" [disabled]="!newIteration.optimizedSql"><mat-icon>add</mat-icon> Add iteration</button>
+              </div>
+            </div>
+          }
+
+          <div class="table-wrap">
+            <table class="simple iter-table">
+              <tr>
+                <th></th>
+                <th>#</th>
+                <th>Status</th>
+                <th class="num hdr-post">Run time</th>
+                <th class="num hdr-delta">Δ run %</th>
+                <th class="num hdr-post">CPU</th>
+                <th class="num hdr-delta">Δ CPU %</th>
+                <th class="num hdr-post">Rows scanned</th>
+                <th class="num hdr-delta">Δ rows %</th>
+                <th class="num hdr-post">Tables</th>
+                <th>Results match</th>
+                <th>Tested</th>
+                <th></th>
+              </tr>
+              <tr class="baseline">
+                <td></td>
+                <td>Original</td>
+                <td></td>
+                <td class="num">{{ t.ogRunDurationMinutes | minutes }}</td>
+                <td></td>
+                <td class="num">{{ t.ogCpuSeconds ?? '—' }}{{ t.ogCpuSeconds !== null ? ' s' : '' }}</td>
+                <td></td>
+                <td class="num">{{ num(t.ogRowsScanned) }}</td>
+                <td></td>
+                <td class="num">{{ t.ogTablesScanned ?? '—' }}</td>
+                <td colspan="3" class="muted">baseline: original run</td>
+              </tr>
+              @for (i of iterations(); track i.id) {
+                <tr [class.best-row]="i.best" [class.sel-row]="i.selected" [class.editing]="editing()?.id === i.id">
+                  <td class="star">
+                    @if (i.best) {
+                      <mat-icon matTooltip="Best iteration">star</mat-icon>
+                    }
+                  </td>
+                  <td>
+                    <b>#{{ i.iterationNo }}</b>
+                    <div class="muted small">{{ i.source === 'AI_AGENT' ? 'AI agent' : 'manual' }}</div>
+                  </td>
+                  <td><app-status [value]="i.status" /></td>
+                  <td class="num">{{ i.runDurationMinutes | minutes }}</td>
+                  @let dRun = negate(i.durationImprovementPct);
+                  @let dCpu = negate(i.cpuImprovementPct);
+                  @let dRows = deltaOf(t.ogRowsScanned, i.rowsScanned);
+                  <td class="num" [class.good]="(dRun ?? 0) < 0" [class.bad]="(dRun ?? 0) > 0">{{ deltaText(dRun) || '—' }}</td>
+                  <td class="num">{{ i.cpuSeconds ?? '—' }}{{ i.cpuSeconds !== null ? ' s' : '' }}</td>
+                  <td class="num" [class.good]="(dCpu ?? 0) < 0" [class.bad]="(dCpu ?? 0) > 0">{{ deltaText(dCpu) || '—' }}</td>
+                  <td class="num">{{ num(i.rowsScanned) }}</td>
+                  <td class="num" [class.good]="(dRows ?? 0) < 0" [class.bad]="(dRows ?? 0) > 0">{{ deltaText(dRows) || '—' }}</td>
+                  <td class="num">
+                    {{ i.tablesScanned ?? '—' }}
+                    @if ((i.tableScansAvoided ?? 0) > 0) {
+                      <span class="good small">(−{{ i.tableScansAvoided }})</span>
+                    }
+                  </td>
+                  <td>
+                    @if (i.resultMatches === true) {
+                      <mat-icon class="good" matTooltip="Same results as the original">check_circle</mat-icon>
+                    } @else if (i.resultMatches === false) {
+                      <mat-icon class="bad" matTooltip="Results differ">cancel</mat-icon>
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </td>
+                  <td class="small">{{ i.testedAt | ts }}</td>
+                  <td class="row-actions">
+                    <button mat-icon-button (click)="compareWith(i)" [disabled]="!i.optimizedSql" matTooltip="Compare with the original SQL" aria-label="Compare with the original SQL"><mat-icon>difference</mat-icon></button>
+                    @if (i.optimizedSql && (i.status === 'PROPOSED' || i.status === 'TESTED' || i.status === 'FAILED')) {
+                      @if (testing() === i.id) {
+                        <span class="row-spinner" matTooltip="Running on Impala…"><mat-spinner diameter="20" /></span>
+                      } @else {
+                        <button mat-icon-button (click)="runTest(i)" [disabled]="testing() !== null" matTooltip="Run it on Impala and record the test result" aria-label="Run test"><mat-icon>science</mat-icon></button>
+                      }
+                    }
+                    <button mat-icon-button (click)="edit(i)" matTooltip="Open / enter test results" aria-label="Edit iteration"><mat-icon>edit</mat-icon></button>
+                    @if (i.status === 'TESTED' || i.status === 'PROPOSED') {
+                      <button mat-icon-button (click)="select(i)" matTooltip="Select for adoption" aria-label="Select for adoption"><mat-icon>how_to_reg</mat-icon></button>
+                    }
+                    @if (i.status !== 'REJECTED' && i.status !== 'ADOPTED') {
+                      <button mat-icon-button (click)="decide('REJECTED', i)" matTooltip="Reject with reason" aria-label="Reject iteration"><mat-icon>block</mat-icon></button>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="12" class="muted">No iterations yet. Run the optimization agent above, or add one manually.</td></tr>
+              }
+            </table>
+          </div>
+
+          @if (editing(); as e) {
+            <div class="card iter-edit">
+              <div class="card-title">Iteration #{{ e.iterationNo }} <app-status [value]="e.status" /></div>
+              <div class="grid-2">
+                <app-sql-block [text]="e.optimizedSql" label="Optimized SQL" maxHeight="320px" />
+                <div>
+                  <div class="card-sub">Change narrative</div>
+                  <p class="pre">{{ e.changeNarrative || '—' }}</p>
+                </div>
+              </div>
+              <div class="section-title">Test results</div>
+              <p class="muted small">
+                Filled automatically when a post-run profile is captured on the group page (Diagnostics → phase "Optimized");
+                or enter them here.
+              </p>
+              <div class="form-grid">
+                <mat-form-field><mat-label>Run duration (min)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.runDurationMinutes" /></mat-form-field>
+                <mat-form-field><mat-label>Execution time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.executionTimeSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Teardown time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.teardownTimeSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Impala CPU time (s)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.cpuSeconds" /></mat-form-field>
+                <mat-form-field><mat-label>Rows scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.rowsScanned" /></mat-form-field>
+                <mat-form-field><mat-label>Tables scanned</mat-label><input matInput type="number" min="0" [(ngModel)]="e.tablesScanned" /></mat-form-field>
+                <mat-form-field><mat-label>Peak memory (MB)</mat-label><input matInput type="number" min="0" [(ngModel)]="e.peakMemoryMb" /></mat-form-field>
+                <mat-form-field><mat-label>Result row count</mat-label><input matInput type="number" min="0" [(ngModel)]="e.resultRowCount" /></mat-form-field>
+                <mat-form-field>
+                  <mat-label>Results match the original?</mat-label>
+                  <mat-select [(ngModel)]="e.resultMatches">
+                    <mat-option [value]="null">Not checked</mat-option>
+                    <mat-option [value]="true">Yes, identical</mat-option>
+                    <mat-option [value]="false">No, results differ</mat-option>
+                  </mat-select>
+                </mat-form-field>
+                <mat-form-field class="span-all"><mat-label>Notes</mat-label><textarea matInput rows="2" [(ngModel)]="e.notes"></textarea></mat-form-field>
+              </div>
+              <div class="actions">
+                <button mat-button (click)="editing.set(null)">Close</button>
+                <button mat-flat-button (click)="saveIteration()"><mat-icon>save</mat-icon> Save results</button>
+              </div>
+            </div>
+          }
+        </div>
+      </mat-tab>
+
+      <!-- ======================================================== 5. COMPARE SQL -->
+      <mat-tab label="Compare SQL">
+        <div class="tab-body">
+          @if (compareOptions().length < 2) {
+            <div class="empty-state">
+              <mat-icon>difference</mat-icon>
+              <div>No optimized SQL yet. Add an iteration (or paste the agent's answer) to compare it with the original.</div>
+              <button mat-stroked-button (click)="startNewIteration()"><mat-icon>add</mat-icon> New iteration</button>
+            </div>
+          } @else {
+            <div class="compare-pick">
+              <mat-form-field subscriptSizing="dynamic">
+                <mat-label>Compare</mat-label>
+                <mat-select [value]="leftKey()" (selectionChange)="compareLeft.set($event.value)">
+                  @for (o of compareOptions(); track o.key) {
+                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+              <button mat-icon-button (click)="swapCompare()" matTooltip="Swap sides" aria-label="Swap sides"><mat-icon>swap_horiz</mat-icon></button>
+              <mat-form-field subscriptSizing="dynamic">
+                <mat-label>with</mat-label>
+                <mat-select [value]="rightKey()" (selectionChange)="compareRight.set($event.value)">
+                  @for (o of compareOptions(); track o.key) {
+                    <mat-option [value]="o.key">{{ o.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <app-sql-diff
+              [left]="leftOption()?.sql"
+              [right]="rightOption()?.sql"
+              [leftLabel]="leftOption()?.label ?? ''"
+              [rightLabel]="rightOption()?.label ?? ''"
+            />
+            @if (rightOption()?.narrative; as n) {
+              <div class="card narrative">
+                <div class="card-title">What changed in {{ rightOption()?.short }}</div>
+                <pre>{{ n }}</pre>
+              </div>
+            }
+          }
+        </div>
+      </mat-tab>
+
+      <!-- ======================================================== 6. RESULTS (before / after) -->
+      <mat-tab label="Results">
+        <div class="tab-body overview">
+          <div class="card compare span-2">
+            <div class="card-title">Before / after</div>
+            <div class="card-sub">
+              Original run vs the
+              @if (selected(); as s) {
+                selected iteration #{{ s.iterationNo }}
+              } @else {
+                post-run values (no iteration selected yet)
+              }
+            </div>
+            <table class="simple">
+              <tr><th>Metric</th><th class="num hdr-pre">Original</th><th class="num hdr-post">Post-implementation</th><th class="num hdr-delta">Δ %</th></tr>
+              @for (r of metrics(); track r.label) {
+                @let c = change(r);
+                <tr>
+                  <td>{{ r.label }}</td>
+                  <td class="num">{{ r.fmt(r.og) }}</td>
+                  <td class="num">{{ r.fmt(r.post) }}</td>
+                  <td class="num" [class.good]="c.good === true" [class.bad]="c.good === false">{{ c.text }}</td>
+                </tr>
+              }
+            </table>
+          </div>
         </div>
       </mat-tab>
 

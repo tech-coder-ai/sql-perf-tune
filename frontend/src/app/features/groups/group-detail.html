@@ -26,6 +26,17 @@
       <div class="kv"><div class="k">Sample seq ID</div><div class="v">{{ g.sampleQuerySeqId ?? '—' }}</div></div>
     </div>
 
+    @if (tracker(); as t) {
+      <app-capture-status
+        [status]="t.captureStatus"
+        [requestedAt]="t.captureRequestedAt"
+        [finishedAt]="t.captureFinishedAt"
+        [message]="t.captureMessage"
+        [compact]="true"
+        consequence="The Diagnostics and DDL tabs and the prompt preview fill in when it finishes; capturing by hand now is not needed."
+        (retry)="recapture()"
+      />
+    }
     <mat-tab-group class="tabs" animationDuration="0ms" mat-stretch-tabs="false">
       <mat-tab label="Overview">
         <div class="tab-body two-col">
@@ -176,8 +187,8 @@
           <div class="run-start">
             <mat-form-field>
               <mat-label>Prompt template</mat-label>
-              <mat-select [(ngModel)]="promptTemplateId">
-                <mat-option [value]="null">Active template for {{ g.sqlEngine }}</mat-option>
+              <mat-select [(ngModel)]="promptTemplateId" (selectionChange)="loadPreview()">
+                <mat-option [value]="0">Active template for {{ g.sqlEngine }}</mat-option>
                 @for (p of prompts(); track p.id) {
                   <mat-option [value]="p.id">{{ p.name }} v{{ p.versionNo }} {{ p.active ? '(active)' : '' }}</mat-option>
                 }
@@ -186,6 +197,27 @@
             <button mat-flat-button (click)="startRun()" [disabled]="busy()"><mat-icon>auto_awesome</mat-icon> Run optimization agent</button>
             <span class="muted">Uses bad SQL, DDL, row counts, explain, parsed profile and exec summary.</span>
           </div>
+          @if (!pendingRun() && preview(); as pv) {
+            <div class="run panel preview">
+              <div class="run-head">
+                <b>Prompt preview</b>
+                <span class="muted">{{ pv.templateName }} v{{ pv.versionNo }} · rendered for this group; nothing is stored until you run the agent</span>
+              </div>
+              @if (pv.missingInputs.length) {
+                <div class="missing">
+                  <mat-icon>warning_amber</mat-icon>
+                  <span>
+                    Not captured yet:
+                    @for (k of pv.missingInputs; track k; let last = $last) {
+                      <b>{{ missingLabel(k) }}</b>{{ last ? '' : ', ' }}
+                    }
+                    . The prompt says "(not captured)" there; capture them first for a better answer.
+                  </span>
+                </div>
+              }
+              <app-sql-block [text]="pv.promptText" label="Prompt" maxHeight="360px" />
+            </div>
+          }
           @for (r of runs(); track r.id) {
             <div class="run panel">
               <div class="run-head">
@@ -204,16 +236,26 @@
                   <app-sql-block [text]="r.changeNarrative" label="Change narrative" />
                   <app-sql-block [text]="r.optimizedSql" label="Optimized SQL" />
                 }
-                <mat-expansion-panel class="span-all">
+                <mat-expansion-panel class="span-all" [expanded]="r.status === 'PENDING' && !waitingForAgent(r)">
                   <mat-expansion-panel-header><mat-panel-title>Rendered prompt</mat-panel-title></mat-expansion-panel-header>
                   <app-sql-block [text]="r.promptText" label="Prompt" maxHeight="480px" />
                 </mat-expansion-panel>
               </div>
-              @if (r.status !== 'COMPLETED') {
+              @if (waitingForAgent(r)) {
+                <div class="waiting" role="status">
+                  <mat-spinner diameter="22" />
+                  <span><b>Waiting for the optimization agent…</b> The prompt was sent; the answer becomes a new iteration on the tracker.</span>
+                </div>
+              } @else if (r.status !== 'COMPLETED') {
+                <ol class="howto">
+                  <li>Copy the prompt above (copy icon).</li>
+                  <li>Run it in your approved AI tool.</li>
+                  <li>Paste the whole answer below and click <b>Store response</b>: it becomes a new iteration.</li>
+                </ol>
                 <div class="paste">
                   <mat-form-field class="grow">
-                    <mat-label>Paste LLM response</mat-label>
-                    <textarea matInput rows="5" [(ngModel)]="responseFor(r).text"></textarea>
+                    <mat-label>Paste LLM response (### CHANGE NARRATIVE / ### OPTIMIZED SQL)</mat-label>
+                    <textarea matInput rows="8" [(ngModel)]="responseFor(r).text"></textarea>
                   </mat-form-field>
                   <mat-form-field>
                     <mat-label>Model</mat-label>

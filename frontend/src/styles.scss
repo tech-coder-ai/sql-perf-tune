@@ -250,6 +250,15 @@ table.simple {
   }
 }
 
+.link-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 10px;
+  font-size: 13px;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

@@ -1,5 +1,6 @@
 package com.techcoder.sqlperf.group;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,6 +21,10 @@ import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.techcoder.sqlperf.common.RowGrouping;
+import com.techcoder.sqlperf.log.ActiveWindow;
+import org.springframework.format.annotation.DateTimeFormat;
+import jakarta.persistence.EntityManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,9 +50,11 @@ public class QueryGroupController {
     private final TuningTrackerRepository trackers;
     private final GroupingService grouping;
     private final CustomFieldService customFields;
+    private final EntityManager em;
 
     public QueryGroupController(QueryGroupRepository groups, QueryLogRepository logs, TuningTrackerRepository trackers,
-                                GroupingService grouping, CustomFieldService customFields) {
+                                GroupingService grouping, CustomFieldService customFields, EntityManager em) {
+        this.em = em;
         this.groups = groups;
         this.logs = logs;
         this.trackers = trackers;
@@ -55,35 +62,68 @@ public class QueryGroupController {
         this.customFields = customFields;
     }
 
+    /** @param activeFrom / activeTo only groups with bad queries between these days (both inclusive) */
+    public record GroupFilter(String q, String userId, String sqlEngine, Integer minGroupSize, Double minAvgDuration,
+                              Boolean tracked,
+                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeFrom,
+                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activeTo) {
+    }
+
+    /** Columns the grid can group by. */
+    static final Map<String, RowGrouping.Column<QueryGroup>> GROUPABLE = Map.of(
+            "sqlEngine", RowGrouping.Column.text("sqlEngine"),
+            "firstSeenDay", RowGrouping.Column.day("firstSeen"),
+            "lastSeenDay", RowGrouping.Column.day("lastSeen"),
+            "groupSize", RowGrouping.Column.number("groupSize"),
+            "distinctUsers", RowGrouping.Column.number("distinctUsers"));
+
     @GetMapping
     @Transactional(readOnly = true)
     public PageResponse<QueryGroupDto> search(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String sort,
-            @RequestParam(required = false) String q,
-            @RequestParam(required = false) String userId,
-            @RequestParam(required = false) String sqlEngine,
-            @RequestParam(required = false) Integer minGroupSize,
-            @RequestParam(required = false) Double minAvgDuration,
-            @RequestParam(required = false) Boolean tracked) {
+            @RequestParam(required = false) List<String> gk,
+            GroupFilter f) {
+        var pageable = Paging.of(page, size, sort, SORTABLE, Sort.by(Sort.Direction.DESC, "totalDurationMinutes"));
+        Page<QueryGroup> result = groups.findAll(spec(f, gk), pageable);
+        return toDtos(result);
+    }
+
+    /** Row grouping: distinct values of {@code by} with their group counts under the same filters. */
+    @GetMapping("/buckets")
+    @Transactional(readOnly = true)
+    public PageResponse<RowGrouping.Bucket> buckets(
+            @RequestParam String by,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) List<String> gk,
+            GroupFilter f) {
+        boolean byValue = sort != null && sort.startsWith(by + ",");
+        boolean desc = sort == null || !byValue || sort.endsWith(",desc");
+        return RowGrouping.buckets(em, QueryGroup.class, spec(f, gk), GROUPABLE, by, byValue, desc, page, size);
+    }
+
+    private static Specification<QueryGroup> spec(GroupFilter f, List<String> gk) {
+        Boolean tracked = f.tracked();
         Specification<QueryGroup> trackedSpec = tracked == null ? null : (root, cq, cb) -> {
             Subquery<Long> sq = cq.subquery(Long.class);
             var t = sq.from(TuningTracker.class);
             sq.select(t.get("groupId")).where(cb.equal(t.get("groupId"), root.get("id")));
             return tracked ? cb.exists(sq) : cb.not(cb.exists(sq));
         };
-        var spec = Specs.<QueryGroup>all(
-                Specs.like("sampleQuery", q),
-                Specs.like("userIds", userId),
-                Specs.eq("sqlEngine", sqlEngine),
-                Specs.gte("groupSize", minGroupSize),
-                Specs.gte("avgDurationMinutes", minAvgDuration),
+        return Specs.<QueryGroup>all(
+                Specs.like("sampleQuery", f.q()),
+                Specs.like("userIds", f.userId()),
+                Specs.eq("sqlEngine", f.sqlEngine()),
+                Specs.gte("groupSize", f.minGroupSize()),
+                Specs.gte("avgDurationMinutes", f.minAvgDuration()),
                 Specs.gte("groupSize", 1),
-                trackedSpec);
-        var pageable = Paging.of(page, size, sort, SORTABLE, Sort.by(Sort.Direction.DESC, "totalDurationMinutes"));
-        Page<QueryGroup> result = groups.findAll(spec, pageable);
-        return toDtos(result);
+                trackedSpec,
+                f.activeFrom() == null && f.activeTo() == null ? null
+                        : (root, cq, cb) -> ActiveWindow.of(root.get("id"), f.activeFrom(), f.activeTo(), cq, cb),
+                RowGrouping.within(RowGrouping.parse(gk, GROUPABLE), GROUPABLE));
     }
 
     @GetMapping("/{id}")

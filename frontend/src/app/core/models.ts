@@ -92,6 +92,8 @@ export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+export type CaptureStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED';
+
 export interface Tracker {
   trackerId: number;
   groupId: number;
@@ -170,6 +172,11 @@ export interface Tracker {
   createdBy: string | null;
   updatedAt: string | null;
   updatedBy: string | null;
+  /** automatic explain / profile / DDL fetch started when the item was tracked (null: tracked before it existed) */
+  captureStatus: CaptureStatus | null;
+  captureRequestedAt: string | null;
+  captureFinishedAt: string | null;
+  captureMessage: string | null;
   version: number;
   customFields: Record<string, string>;
 }
@@ -310,6 +317,8 @@ export interface DailyInsight {
   instanceBuckets: CountPoint[];
   topUsers: CountPoint[];
   peakHour: number | null;
+  /** most recent day that has any bad query (null when nothing is loaded) */
+  latestDataDay: string | null;
 }
 
 export interface PipelineInsight {
@@ -321,6 +330,12 @@ export interface PipelineInsight {
     inProgressPatterns: number;
     awaitingAdoptionPatterns: number;
     onHoldOrRejectedPatterns: number;
+    /** the figures above are the active backlog: bad queries in the last activeDays days up to asOf */
+    activeDays: number;
+    asOf: string;
+    allTimePatterns: number;
+    allTimeBadQueries: number;
+    allTimeUntrackedPatterns: number;
   };
   priorDay: {
     date: string;
@@ -560,6 +575,16 @@ export interface TableDdl {
   capturedAt: string;
 }
 
+/** A prompt rendered for a group without starting a run. */
+export interface PromptPreview {
+  promptTemplateId: number;
+  templateName: string;
+  versionNo: number;
+  promptText: string;
+  /** template placeholders whose input is not captured yet, e.g. "ddl", "explain" */
+  missingInputs: string[];
+}
+
 export interface OptimizationRun {
   id: number;
   groupId: number;
@@ -615,4 +640,16 @@ export interface DashboardSummary {
     sampleQuery: string | null;
   }[];
   savedMinutesPerRun: number | null;
+}
+
+/** One group of a server-side row grouping: the column value (null = empty) and its row count. */
+export interface Bucket {
+  key: string | number | null;
+  count: number;
+}
+
+/** The optimization agent answering new runs: automatic ones (LLM endpoint, mock) answer by themselves. */
+export interface AgentInfo {
+  modelName: string;
+  automatic: boolean;
 }

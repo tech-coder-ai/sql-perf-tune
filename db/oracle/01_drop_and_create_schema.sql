@@ -4,7 +4,7 @@
 --
 -- !!! DESTRUCTIVE: all SPT data (logs, groups, tracker, history) is lost. !!!
 --
--- Equivalent to Flyway migrations V1-V5 (backend/src/main/resources/db/migration/oracle)
+-- Equivalent to Flyway migrations V1-V6 (backend/src/main/resources/db/migration/oracle)
 -- in a single script, for DBAs who build or reset an environment by hand.
 --
 -- Run as the schema owner (e.g. SPT_OWNER, see 00_create_schema.sql) with SQL*Plus, SQLcl or
@@ -12,8 +12,8 @@
 --     sqlplus SPT_OWNER@//host:1521/SERVICE @01_drop_and_create_schema.sql
 --
 -- Flyway: the script also drops "flyway_schema_history". Start the service once with
---     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=5
--- so Flyway records this schema as version 5 and only applies newer migrations (V6+).
+--     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=6
+-- so Flyway records this schema as version 6 and only applies newer migrations (V7+).
 -- (Or set spring.flyway.enabled=false and keep the schema up to date with scripts.)
 --
 -- Contents
@@ -313,6 +313,10 @@ CREATE TABLE SPT_TUNING_TRACKER (
     STAGE_CHANGED_AT                TIMESTAMP,
     ADOPTED_AT                      TIMESTAMP,
     CLOSED_AT                       TIMESTAMP,
+    CAPTURE_STATUS                  VARCHAR2(20),
+    CAPTURE_REQUESTED_AT            TIMESTAMP,
+    CAPTURE_FINISHED_AT             TIMESTAMP,
+    CAPTURE_MESSAGE                 VARCHAR2(1000),
     CREATED_AT                      TIMESTAMP       NOT NULL,
     CREATED_BY                      VARCHAR2(100),
     UPDATED_AT                      TIMESTAMP,
@@ -322,12 +326,14 @@ CREATE TABLE SPT_TUNING_TRACKER (
     CONSTRAINT UK_SPT_TRACKER_GROUP UNIQUE (GROUP_ID),
     CONSTRAINT FK_SPT_TRACKER_GROUP FOREIGN KEY (GROUP_ID) REFERENCES SPT_QUERY_GROUP (ID),
     CONSTRAINT CK_SPT_TRACKER_PRIORITY CHECK (PRIORITY IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
-    CONSTRAINT CK_SPT_TRACKER_SOURCE CHECK (REQUEST_SOURCE IN ('LOG_DETECTED', 'PROACTIVE_UAT', 'USER_REQUEST'))
+    CONSTRAINT CK_SPT_TRACKER_SOURCE CHECK (REQUEST_SOURCE IN ('LOG_DETECTED', 'PROACTIVE_UAT', 'USER_REQUEST')),
+    CONSTRAINT CK_SPT_TRACKER_CAPTURE CHECK (CAPTURE_STATUS IN ('PENDING', 'RUNNING', 'DONE', 'FAILED'))
 );
 COMMENT ON TABLE SPT_TUNING_TRACKER IS 'Tuning tracker: one item per query group being tuned, from triage to adoption.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.WORKFLOW_STATUS IS 'Stage: NEW, DIAGNOSTICS_CAPTURED, OPTIMIZATION_REQUESTED, OPTIMIZED, POST_RUN_VALIDATED, SME_VALIDATION, ADOPTED, REJECTED, ON_HOLD.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.STAGE_CHANGED_AT IS 'When the item entered its current stage.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.SELECTED_ITERATION_ID IS 'Iteration selected for adoption; its SQL and post-run metrics are copied here.';
+COMMENT ON COLUMN SPT_TUNING_TRACKER.CAPTURE_STATUS IS 'Automatic explain / profile / DDL fetch: PENDING, RUNNING, DONE, FAILED.';
 CREATE INDEX IX_SPT_TRACKER_STATUS ON SPT_TUNING_TRACKER (WORKFLOW_STATUS);
 CREATE INDEX IX_SPT_TRACKER_ADOPTED ON SPT_TUNING_TRACKER (ADOPTED_AT);
 CREATE INDEX IX_SPT_TRACKER_THEME ON SPT_TUNING_TRACKER (THEME);
