@@ -26,6 +26,17 @@
       <div class="kv"><div class="k">Sample seq ID</div><div class="v">{{ g.sampleQuerySeqId ?? '—' }}</div></div>
     </div>
 
+    @if (tracker(); as t) {
+      <app-capture-status
+        [status]="t.captureStatus"
+        [requestedAt]="t.captureRequestedAt"
+        [finishedAt]="t.captureFinishedAt"
+        [message]="t.captureMessage"
+        [compact]="true"
+        consequence="The Diagnostics and DDL tabs and the prompt preview fill in when it finishes; capturing by hand now is not needed."
+        (retry)="recapture()"
+      />
+    }
     <mat-tab-group class="tabs" animationDuration="0ms" mat-stretch-tabs="false">
       <mat-tab label="Overview">
         <div class="tab-body two-col">

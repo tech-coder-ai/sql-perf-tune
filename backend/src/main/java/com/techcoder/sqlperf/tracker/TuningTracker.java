@@ -41,6 +41,9 @@ public class TuningTracker {
     /** Where the tuning request came from (Q14: proactive vs user requested vs detected in logs). */
     public enum RequestSource { LOG_DETECTED, PROACTIVE_UAT, USER_REQUEST }
 
+    /** Background fetch of explain plan, profile and DDL started when the item is tracked. */
+    public enum CaptureStatus { PENDING, RUNNING, DONE, FAILED }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -103,6 +106,15 @@ public class TuningTracker {
 
     /** Iteration chosen as the best result (copied into the post-run metrics and optimized query). */
     private Long selectedIterationId;
+
+    /** Automatic diagnostics capture (null for items tracked before it existed). */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private CaptureStatus captureStatus;
+    private LocalDateTime captureRequestedAt;
+    private LocalDateTime captureFinishedAt;
+    @Column(length = 1000)
+    private String captureMessage;
 
     /** When the item entered its current workflow status. */
     private LocalDateTime stageChangedAt;

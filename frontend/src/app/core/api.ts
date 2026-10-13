@@ -32,6 +32,7 @@ import {
   SqlDiagnostic,
   TableDdl,
   Tracker,
+  Bucket,
 } from './models';
 
 export type Params = Record<string, string | number | boolean | readonly string[] | null | undefined>;
@@ -57,6 +58,10 @@ export class Api {
   // ----- logs
   logs(p: Params): Observable<Page<QueryLog>> {
     return this.http.get<Page<QueryLog>>('/api/logs', { params: toParams(p) });
+  }
+  /** Row grouping: distinct values of a column with row counts, under the screen's filters (see RowGrouping). */
+  buckets(resource: 'logs' | 'groups' | 'tracker', p: Params): Observable<Page<Bucket>> {
+    return this.http.get<Page<Bucket>>(`/api/${resource}/buckets`, { params: toParams(p) });
   }
   log(id: number): Observable<QueryLog> {
     return this.http.get<QueryLog>(`/api/logs/${id}`);
@@ -110,6 +115,10 @@ export class Api {
   }
   updateTracker(id: number, body: Partial<Tracker>): Observable<Tracker> {
     return this.http.put<Tracker>(`/api/tracker/${id}`, body);
+  }
+  /** Starts the automatic explain / profile / DDL capture again; progress is on the returned item. */
+  recapture(id: number): Observable<Tracker> {
+    return this.http.post<Tracker>(`/api/tracker/${id}/capture`, null);
   }
   trackerHistory(id: number): Observable<AuditEvent[]> {
     return this.http.get<AuditEvent[]>(`/api/tracker/${id}/history`);

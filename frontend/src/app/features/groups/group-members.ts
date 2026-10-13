@@ -29,7 +29,7 @@ export class GroupMembers {
   private readonly api = inject(Api);
   private readonly dialog = inject(MatDialog);
 
-  readonly gridOptions: GridOptions<QueryLog> = { ...serverGridOptions<QueryLog>(10), sideBar: false };
+  readonly gridOptions: GridOptions<QueryLog> = { ...serverGridOptions<QueryLog>(10), sideBar: false, rowGroupPanelShow: 'never' };
 
   readonly columns: ColDef<QueryLog>[] = [
     { field: 'seqId', headerName: 'Seq ID', sortable: true, width: 100, ...numCol },

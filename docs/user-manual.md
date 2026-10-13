@@ -59,6 +59,16 @@ All lists are data grids:
 - **Export:** right-click → *Export loaded rows to Excel* exports what is currently loaded in the grid. The
   tracker's **Export Excel** button exports *all* rows that match the filter, including custom columns.
 - **Filters:** use the form above each grid and press **Apply**.
+- **Group rows (Query logs, Query groups, Tuning tracker):** right-click a column header (or use its ⋮ menu)
+  and choose **Group by …**, or drag the header into the *Drag here to set row groups* bar above the grid.
+  Each group shows its value and how many rows it holds, e.g. *jsmith (685)*; click the chevron to open it.
+  Add a second column to group within groups (e.g. user, then error category). Remove a grouping with the ✕
+  on its chip, *Un-Group* in the header menu, or the **Columns** panel. Groups are counted by the server under
+  the current filters, so they cover every row, not just the loaded page. Groupable columns:
+  - Query logs: start day (hidden column *Start day*), user, error code, error category, group, import.
+  - Query groups: group size, distinct users, SQL engine, first / last seen day (hidden columns).
+  - Tuning tracker: stage, priority, source, SQL engine, diagnostics capture, theme, environment, requested by,
+    the leads and every dropdown status. Your grouping is remembered with the layout.
 
 ---
 
@@ -105,6 +115,14 @@ CSV files may use comma, semicolon, pipe or tab as the separator. Two ready-made
 
 If an administrator configured a data source (Oracle or Impala), switch the dialog to **Database**, pick the
 source and click **Import**. Only rows newer than the previous pull are requested.
+
+### Opening Query logs from a number
+
+Most numbers on the **Command center** and **Insights** open the log rows behind them, already filtered (§5,
+§6). The date fields are filled in, and other filters that came with the link are shown as chips under the
+form (*Opened with: User is akumar*). Remove a chip with its ✕, or press **Reset** to clear everything.
+Dates here work like on the dashboards: a row counts on the day of its start time, or of its load time when
+it has no start time, so the row count matches the number you clicked.
 
 ### Reading the result
 
@@ -199,6 +217,19 @@ number includes every pattern ever loaded that is not adopted, also ones that st
   **Top patterns of the day** and **the last 14 days**.
 - **All insights** opens the full Insights page.
 
+**From a number to the log rows.** These open **Query logs** filtered to exactly the rows counted (§3):
+
+| Click | Opens |
+|---|---|
+| Bad queries tile (Q1) | the day's bad queries |
+| Recurring tile (Q2) | the day's bad queries whose pattern ran on an earlier day |
+| A bar of *Bad queries by hour* | that hour of the day |
+| A bar of *Last 14 days* | that day |
+| *Today* / *Total* in *Top patterns of the day* | that pattern's rows of the day / of all time |
+
+The other tiles lead to the screen where you act on them: patterns → Query groups, outstanding and awaiting
+adoption → Pipeline board, savings → Insights.
+
 Every chart has a **table view** (the switch at the top right of the card) with the exact values.
 
 ---
@@ -245,6 +276,18 @@ The Insights page has an index on the left grouped as *Today*, *Tuning outcomes*
 | Q13 | Which users always have bad SQL? | Users ranked by how consistently they produce bad SQL; a **repeat user** had bad SQL on at least half the days of the period (5+ queries) |
 | Q14 | Proactive (UAT) tuning vs user requests | Items per month by source: detected in logs, proactive UAT, user request |
 | Q15 | Which queries wait for adoption, and which optimizations were rejected and why? | Waiting list (oldest first), rejections by reason and the latest rejections |
+
+**From a number to the log rows.** Charts and lists that count bad queries open **Query logs** with those rows
+(the tooltip says so):
+
+| Click | Opens |
+|---|---|
+| Q1 a day's bar | that day's bad queries |
+| Q2 *Recurring queries* / *Queries of new patterns* | the day's rows of recurring / new patterns (*Patterns run more than once* opens Query groups) |
+| Q3 *This day* / *All time* of a pattern | that pattern's rows of the day / of all time |
+| Q7 a user group | the period's bad queries of the group's users (*Unassigned* = users without a user group) |
+| Q7 a top user, Q13 a user | that user's bad queries in the period (exactly that user id) |
+| Q8 an hour's bar | that hour of the day |
 
 ---
 
@@ -294,19 +337,24 @@ are shown in red.
 - **Journey:** the stages from Triage to Adopted with the date each was reached and the days spent in it.
   Skipped stages are shown as such. Below it, **Next step** says what to do now.
 - **Tabs**, in the order the work progresses. The item opens on the tab of its current stage: Triage →
-  Tracking, Diagnosed to Tested → Iterations, Awaiting adoption → Compare SQL, Adopted / Rejected / On hold →
-  Results.
-  1. **Tracking:** triage and all tracking fields: theme, priority, owners, statuses (§8.3).
-  2. **SQL & diagnostics:** raw, formatted, cleansed (comments removed, still runnable) and optimized SQL,
-     plus a link to capture the explain plan / profile on the group page.
-  3. **Iterations:** every tuning attempt and its test results (§8.2). The compare icon on a row opens that
+  Tracking, Diagnosed → Diagnostics, Tuning to Tested → Iterations, Awaiting adoption → Compare SQL,
+  Adopted / Rejected / On hold → Results.
+  1. **Overview:** where the item stands (stage, priority, theme, diagnostics, iterations, original run), the
+     facts (source, environment, first / last seen, runs, users, run times, leads), problem and
+     recommendations, and the original SQL.
+  2. **Tracking:** triage and all tracking fields: theme, priority, owners, statuses (§8.3).
+  3. **Diagnostics:** the original run as captured: run time, execution, teardown, Impala CPU, rows and
+     tables scanned, peak memory and rows returned; the exec summary and explain plan; the DDL and row count
+     of every table the SQL reads; the original and cleansed SQL. *Edit diagnostics · run the AI agent* opens
+     the group page. While the automatic capture runs, the tab is labelled *Diagnostics …* (§8.6).
+  4. **Iterations:** every tuning attempt and its test results (§8.2). The compare icon on a row opens that
      iteration in **Compare SQL**.
-  4. **Compare SQL:** the original query next to an optimized one, with the differences highlighted
+  5. **Compare SQL:** the original query next to an optimized one, with the differences highlighted
      (§8.5).
-  5. **Results:** before / after of run time, execution, teardown, Impala CPU, rows and tables scanned and
-     peak memory (original run vs the selected iteration), facts, problem and recommendations.
-  6. **Log rows:** the underlying executions.
-  7. **History:** who changed which field, when, from what to what, including every stage change.
+  6. **Results:** before / after of run time, execution, teardown, Impala CPU, rows and tables scanned and
+     peak memory (original run vs the selected iteration).
+  7. **Log rows:** the underlying executions.
+  8. **History:** who changed which field, when, from what to what, including every stage change.
 
 ### 8.2 Tuning iterations
 
@@ -367,6 +415,29 @@ else the latest). Pick any two from *Compare* / *with* (e.g. iteration #1 vs #2)
   under the diff.
 
 ---
+
+### 8.6 Automatic diagnostics capture
+
+As soon as a group is put on the tracker (**Track** on Query groups, *Add to tracker* on a group page, or a new
+tuning request), the application fetches in the background what the optimization prompt needs from Impala:
+
+- the **explain plan** of the sample SQL,
+- the **query profile** of its run (parsed into run time, execution and teardown time, Impala CPU, rows and
+  tables scanned, peak memory),
+- the **DDL and row count** of every table it reads.
+
+It usually takes seconds. Meanwhile a blue *Diagnostics capture in progress* bar shows on the item's
+Overview, Tracking and Diagnostics tabs and on the group page. You do not have to wait: triage on the Tracking
+tab right away. When the capture finishes the item moves to **Diagnosed**, the original-run metrics fill in
+(your unsaved edits on the Tracking tab are kept), and a message offers to show the diagnostics.
+
+- If something was already captured by hand on the group page, it is kept; only missing table DDL is added.
+- If the capture fails, a red bar says why, with **Try again**; you can always capture by hand on the group
+  page. **Capture again** (on a finished capture) fetches the diagnostics once more.
+- Automatic capture is for Impala SQL; other engines are captured by hand.
+- *Current build:* the Impala connection is not wired in yet, so the capture returns **generated sample
+  diagnostics** in Impala's format (marked *impala (automatic, mock)* as the capturing user). Do not use their
+  numbers for decisions.
 
 ## 9. Tuning workflow on the group page
 

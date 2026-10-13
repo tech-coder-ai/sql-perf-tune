@@ -14,7 +14,8 @@ public record SptProperties(
         @DefaultValue Fingerprint fingerprint,
         @DefaultValue Ingestion ingestion,
         @DefaultValue Cors cors,
-        @DefaultValue Ui ui) {
+        @DefaultValue Ui ui,
+        @DefaultValue Diagnostics diagnostics) {
 
     public enum SecurityMode { NONE, JWT }
 
@@ -60,6 +61,23 @@ public record SptProperties(
      */
     public record Ui(@DefaultValue("") String agGridLicenseKey) {
     }
+
+    /**
+     * Automatic capture of explain plan, profile and table DDL when a group is put on the tracker.
+     *
+     * @param autoCapture     start the capture for every newly tracked group
+     * @param client          MOCK: generated, Impala-shaped diagnostics (until the Impala client is wired in)
+     * @param mockDelayMillis how long the mock client takes, so the "in progress" state can be seen
+     * @param threads         captures running at the same time
+     */
+    public record Diagnostics(
+            @DefaultValue("true") boolean autoCapture,
+            @DefaultValue("MOCK") DiagnosticsClient client,
+            @DefaultValue("4000") long mockDelayMillis,
+            @DefaultValue("2") int threads) {
+    }
+
+    public enum DiagnosticsClient { MOCK }
 
     public record Cors(@DefaultValue("http://localhost:4200") List<String> allowedOrigins) {
     }

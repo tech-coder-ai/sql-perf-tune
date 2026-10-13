@@ -19,7 +19,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
           </button>
         </div>
       }
-      <pre>{{ text() || placeholder() }}</pre>
+      <pre [class.nowrap]="!wrap()">{{ text() || placeholder() }}</pre>
     </div>
   `,
   styles: `
@@ -51,6 +51,10 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       white-space: pre-wrap;
       word-break: break-word;
     }
+    pre.nowrap {
+      white-space: pre;
+      word-break: normal;
+    }
   `,
 })
 export class SqlBlock {
@@ -58,6 +62,8 @@ export class SqlBlock {
   readonly label = input<string>('');
   readonly maxHeight = input<string>('360px');
   readonly placeholder = input<string>('—');
+  /** false for column-aligned text (exec summary, explain plan): scroll sideways instead of wrapping */
+  readonly wrap = input(true);
 
   private readonly clipboard = inject(Clipboard);
   private readonly snack = inject(MatSnackBar);

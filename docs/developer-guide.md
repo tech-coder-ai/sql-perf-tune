@@ -50,7 +50,7 @@ Optional environment variables (local):
 backend/
   src/main/java/com/techcoder/sqlperf/
     config/        properties (spt.*), security, OpenAPI, UI config endpoint, Hibernate function contributor
-    common/        paging, specs, problem-detail handler, CurrentUser
+    common/        paging, specs, RowGrouping (server-side grid grouping), problem-detail handler, CurrentUser
     fingerprint/   SqlTokenizer, SqlFingerprinter (grouping key), SqlPrettyPrinter
     ingestion/     file parser, JDBC puller, IngestionService (de-duplication), RowKeys, SourceFile, RowKeyBackfill
     log/           QueryLog, LogSighting (load history), controller
@@ -58,6 +58,7 @@ backend/
     tracker/       TuningTracker, TrackerService (stages, journey, board, requests, audited updates), Excel export
     iteration/     TuningIteration, IterationService (best / select / adopt / reject)
     workflow/      diagnostics, Impala profile parser, prompt templates, optimization runs, feedback
+    diagnostics/   automatic explain / profile / DDL capture on tracking (QueryMetadataClient, mock Impala client)
     insights/      InsightsService (Q1-Q15), controller
     lookup/        dropdown values (SPT_LOOKUP)
     users/         user directory: user id -> user group (SPT_USER_DIRECTORY)
@@ -70,7 +71,8 @@ backend/
     db/migration/sqlite/V*.sql     <- SQLite twins, same version numbers
 frontend/
   src/app/core/        API client, models, theme, interceptor, prefs, stages.ts, lookups.ts (LookupStore)
-  src/app/shared/      grid.ts (AG Grid setup), charts.ts, journey stepper, request dialog, SQL viewer, chips
+  src/app/shared/      grid.ts (AG Grid setup, row grouping), charts.ts, drill.ts (dashboard → Query logs links),
+                       capture-status.ts, journey stepper, request dialog, SQL viewer, chips
   src/app/features/    home (command center), insights, pipeline, logs, groups, tracker, admin
 db/oracle/00_create_schema.sql    one-off DBA script (users / grants)
 db/oracle/01_drop_and_create_schema.sql   drop + re-create all tables / views + initial values
@@ -95,9 +97,9 @@ docs/                             architecture, developer guide, user manual
 - Custom HQL functions (`SptFunctionContributor`, dialect-aware): `spt_lower(...)` for case-insensitive search
   on Oracle CLOBs and SQLite, and `spt_date(ts)` for grouping by calendar day (§9).
 - `db/oracle/01_drop_and_create_schema.sql` drops and re-creates every table and view and loads the initial
-  values (prompt template, dropdown values), equivalent to V1-V4 in one script for DBAs. It also drops the
+  values (prompt template, dropdown values), equivalent to V1-V6 in one script for DBAs. It also drops the
   Flyway history; start the service once with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` and
-  `SPRING_FLYWAY_BASELINE_VERSION=4` afterwards. Keep it in step when adding a migration.
+  `SPRING_FLYWAY_BASELINE_VERSION=6` afterwards. Keep it in step when adding a migration.
 - Oracle scripts were written for 19c+ (identity columns). Run them against your target version in CI
   before the first shared deployment.
 
@@ -110,7 +112,7 @@ docs/                             architecture, developer guide, user manual
 
 Migrations: V1 core schema, V2 prompt seed, V3 load de-duplication, V4 analytics and iterations (lookups,
 iterations, stage timestamps, CPU / scan metrics, user directory, request source), V5 pooled ids (Oracle
-sequences, see §5). See [architecture.md](architecture.md) for the ER diagram.
+sequences, see §5), V6 diagnostics capture status on the tracker (§8). See [architecture.md](architecture.md) for the ER diagram.
 
 ### Oracle in Docker (local)
 
@@ -250,6 +252,34 @@ one `BoardCard` per item with `daysInStage`.
 `REQUEST_SOURCE` is `LOG_DETECTED` (default), `PROACTIVE_UAT` or `USER_REQUEST`. A request fingerprints the
 SQL and joins an existing group or creates one.
 
+### Automatic diagnostics capture (package `diagnostics/`)
+
+Tracking a group starts a background fetch of the explain plan, profile and table DDL:
+
+1. `TrackerService.create` publishes `TrackerCreated` inside the creating transaction.
+   `DiagnosticsCaptureService.markQueued` (`@EventListener`) sets `CAPTURE_STATUS = PENDING` in that
+   transaction, so the response already says "in progress"; `startQueued` (`@TransactionalEventListener`,
+   after commit) submits the job to the `diagnosticsExecutor` (`spt.diagnostics.threads`).
+2. `run`: short transaction → `RUNNING`; `QueryMetadataClient.fetch` **outside** any transaction (it is slow,
+   and SQLite has one connection); short transaction → `WorkflowService.captureDiagnostic` (phase `ORIGINAL`)
+   and `addDdl` per table, which fill the `OG_*` metrics and `advanceTo(DIAGNOSTICS_CAPTURED)` exactly like a
+   manual capture; then `DONE` with a message, or `FAILED` with the reason. Diagnostics captured by hand
+   are kept and existing table DDL is not duplicated. The work runs as user `QueryMetadataClient.source()`
+   (`CurrentUser.runAs`), so audit and "captured by" show where it came from.
+3. Status columns are written with bulk JPQL updates (`TuningTrackerRepository.setCapture`), which do not bump
+   the row version: an edit the user started meanwhile still saves. The UI polls the item every 2.5 s while
+   `PENDING` / `RUNNING`, then merges the new values into the form for the fields the user has not touched.
+4. `POST /api/tracker/{id}/capture` runs it again; at startup, captures left `PENDING` / `RUNNING` by a
+   restart are resumed. Only `IMPALA` groups are captured; others end `FAILED` with a hint.
+
+**Wiring the real Impala client.** Implement `QueryMetadataClient` (e.g. `ImpalaMetadataClient`): `EXPLAIN`
+over JDBC, the profile of the logged run from the impalad web UI (`/query_profile_plain_text?query_id=`) or
+the Cloudera Manager API, and `SHOW CREATE TABLE` / `SHOW TABLE STATS` per table. Register it under a new
+`spt.diagnostics.client` value (add it to `SptProperties.DiagnosticsClient`) with
+`@ConditionalOnProperty`, the way `MockImpalaMetadataClient` is registered for `MOCK`. The mock derives
+tables and columns from the SQL and generates deterministic, Impala-formatted output (it waits
+`spt.diagnostics.mock-delay-millis` so the in-progress state is visible).
+
 ### Iterations (`SPT_TUNING_ITERATION`, package `iteration/`)
 
 ```
@@ -371,10 +401,23 @@ All grid setup lives in `src/app/shared/grid.ts`:
 - **Server-side data:** `serverGridOptions()` + `pagedDatasource(fetch, sortMap)` adapt the SSRM block
   requests to the API's `page/size/sort` parameters. Filters are form fields outside the grid; call
   `api.refreshServerSide({ purge: true })` after changing them.
+- **Row grouping** (Query logs, Query groups, Tuning tracker): `serverGridOptions()` turns on the group panel
+  and the auto group column; `groupingDatasource({ rows, buckets })` asks `GET /api/{logs|groups|tracker}/buckets
+  ?by=<column>` for each grouping level (distinct values + counts under the same filters, sorted by count, or
+  by value when the group column is sorted) and the normal list endpoint below the last level. Opened groups
+  travel as `gk=<column>:<value>` (`gk=<column>!` = empty) on both endpoints, in grouping order. Group rows
+  carry `__key` / `__count` (`isGroupRow()`); `LinkCell` and row clicks ignore them. To make a column
+  groupable add it to the controller's `GROUPABLE` map (`RowGrouping.Column.text / number / enumOf / day`)
+  and set `enableRowGroup: true` on the column (tracker: `GROUPABLE` in `tracker-columns.ts`).
+- **Dashboard links:** `shared/drill.ts` `logsQuery({ day, hour, from, to, user, userGroup, groupId, pattern })`
+  builds the `/logs` query parameters. The logs API filters `from` / `to` on `coalesce(startTime, createdAt)`
+  like `InsightsService`, `user` is an exact match, `userGroup` goes through `SPT_USER_DIRECTORY`
+  (`Unassigned` = no group) and `pattern=RECURRING|NEW` compares the group's `firstSeen` with the `from` day.
+  `LogDrillDownTest` asserts each link's row count equals the dashboard number.
 - **Master/detail:** Query Groups use `masterDetail` with `GroupDetailRow` as detail renderer (it embeds the
   `GroupMembers` grid).
 - **Renderers:** `LinkCell` (router links that don't trigger the row click), `StatusCell`.
-- Tracker layout (order / width / visibility / pinning) is stored in `localStorage` under `tracker.grid.v2`
+- Tracker layout (order / width / visibility / pinning / row grouping) is stored in `localStorage` under `tracker.grid.v4`
   (bump the key when the default columns change).
 
 ---
@@ -394,6 +437,10 @@ All grid setup lives in `src/app/shared/grid.ts`:
 | `spt.ingestion.row-identity` | `CONTENT` | or `SEQ_ID` |
 | `spt.ui.ag-grid-license-key` | `${SPT_AG_GRID_LICENSE_KEY:}` | |
 | `spt.cors.allowed-origins` | `http://localhost:4200` | |
+| `spt.diagnostics.auto-capture` | `true` | fetch explain / profile / DDL when a group is tracked |
+| `spt.diagnostics.client` | `MOCK` | generated Impala-shaped diagnostics until the Impala client exists |
+| `spt.diagnostics.mock-delay-millis` | `4000` | |
+| `spt.diagnostics.threads` | `2` | captures running at the same time |
 
 Oracle profile variables: `SPT_DB_URL`, `SPT_DB_USER`, `SPT_DB_PASSWORD`, `SPT_DB_SCHEMA`, `SPT_DB_POOL_SIZE`.
 Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
@@ -403,7 +450,7 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 ## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 22 tests incl. ingestion / de-duplication and the tuning lifecycle on SQLite
+cd backend && mvn test                     # 25 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, drill-down on SQLite
 # the same import round-trip test against a real Oracle (container above):
 SPT_TEST_ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 SPT_TEST_ORACLE_USER=SPT_APP \
   SPT_TEST_ORACLE_PASSWORD=<app-pwd> mvn test -Dtest=ImportRoundTripOracleIT
@@ -414,7 +461,9 @@ cd frontend && npx ng build                # production build + bundle budgets
 `IngestionFlowTest` covers: header aliases, derived durations, rejected rows, grouping, tracker creation,
 identical-file re-load, overlapping files and in-file duplicates. Add a case there for any ingestion change.
 `TuningLifecycleTest` covers request → diagnostics → iterations → select → reject → adopt, every insight
-endpoint, and recovery of rows left ungrouped by an interrupted import.
+endpoint, and recovery of rows left ungrouped by an interrupted import (it runs with
+`spt.diagnostics.auto-capture=false` so the background capture does not race its manual captures).
+`DiagnosticsCaptureTest` covers the automatic capture; `LogDrillDownTest` the dashboard links and row grouping.
 
 ---
 

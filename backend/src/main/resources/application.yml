@@ -63,6 +63,13 @@ spt:
     # CONTENT (seq_id + user + times + SQL text) or SEQ_ID (seq_id only) decides "already loaded"
     row-identity: CONTENT
     jdbc-query-timeout-seconds: 600
+  diagnostics:
+    # fetch explain plan, profile and table DDL in the background as soon as a group is tracked
+    auto-capture: true
+    # MOCK = generated Impala-shaped output until the Impala client is wired in
+    client: MOCK
+    mock-delay-millis: 4000
+    threads: 2
   cors:
     allowed-origins: http://localhost:4200
   ui:

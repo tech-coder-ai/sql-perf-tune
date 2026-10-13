@@ -1,4 +1,4 @@
-import { Component, computed, OnInit, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, OnInit, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatExpansionModule } from '@angular/material/expansion';
@@ -22,7 +22,9 @@ import {
   QueryGroup,
   SqlDiagnostic,
   TableDdl,
+  Tracker,
 } from '../../core/models';
+import { CaptureStatusBanner } from '../../shared/capture-status';
 import { MinutesPipe, TimestampPipe } from '../../shared/format';
 import { SqlBlock } from '../../shared/sql-block';
 import { StatusChip } from '../../shared/status-chip';
@@ -56,6 +58,7 @@ const MISSING_LABELS: Record<string, string> = {
     SqlBlock,
     StatusChip,
     GroupMembers,
+    CaptureStatusBanner,
     MinutesPipe,
     TimestampPipe,
   ],
@@ -69,6 +72,14 @@ export class GroupDetail implements OnInit {
   private readonly api = inject(Api);
   private readonly snack = inject(MatSnackBar);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+  /** the group's tracker item: carries the status of the automatic diagnostics capture */
+  readonly tracker = signal<Tracker | null>(null);
+  readonly captureBusy = computed(() => {
+    const s = this.tracker()?.captureStatus;
+    return s === 'PENDING' || s === 'RUNNING';
+  });
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly group = signal<QueryGroup | null>(null);
   readonly diagnostics = signal<SqlDiagnostic[]>([]);
@@ -106,6 +117,7 @@ export class GroupDetail implements OnInit {
   }
 
   ngOnInit(): void {
+    this.destroyRef.onDestroy(() => this.pollTimer && clearTimeout(this.pollTimer));
     this.reload();
     this.api.prompts().subscribe((p) => this.prompts.set(p));
   }
@@ -126,9 +138,29 @@ export class GroupDetail implements OnInit {
       this.feedback.set(r.feedback);
       if (r.group.trackerId) {
         this.api.iterations(r.group.trackerId).subscribe((i) => this.iterations.set(i));
+        this.watchCapture(r.group.trackerId);
       }
     });
     this.loadPreview();
+  }
+
+  /** While the automatic capture runs, re-read the tracker item; reload the page's data when it ends. */
+  private watchCapture(trackerId: number): void {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.api.tracker(trackerId).subscribe((t) => {
+      const wasBusy = this.captureBusy();
+      this.tracker.set(t);
+      if (this.captureBusy()) {
+        this.pollTimer = setTimeout(() => this.watchCapture(trackerId), 2500);
+      } else if (wasBusy) {
+        this.reload();
+      }
+    });
+  }
+
+  recapture(): void {
+    const t = this.tracker();
+    if (t) this.api.recapture(t.trackerId).subscribe(() => this.watchCapture(t.trackerId));
   }
 
   /** Renders the chosen template for this group (called on load and whenever the template changes). */

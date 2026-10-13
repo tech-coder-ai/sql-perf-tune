@@ -7,7 +7,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { Api } from '../../core/api';
 import {
@@ -22,6 +22,7 @@ import {
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, LineChart, Series, TableView } from '../../shared/charts';
 import { addDays, minutesText, num, pct, secondsText, signedPct, today } from '../../shared/dates';
+import { LogDrill, logsQuery } from '../../shared/drill';
 import { StatusChip } from '../../shared/status-chip';
 
 interface Question {
@@ -61,6 +62,7 @@ type Preset = '7d' | '30d' | 'mtd' | '90d' | 'custom';
 })
 export class Insights {
   private readonly api = inject(Api);
+  private readonly router = inject(Router);
   protected readonly num = num;
   protected readonly minutesText = minutesText;
   protected readonly secondsText = secondsText;
@@ -186,11 +188,26 @@ export class Insights {
     const delta = signedPct(d.badQueries, d.badQueriesPreviousDay);
     return `${num(d.badQueries)} bad queries on ${d.date}${delta ? ' (' + delta + ')' : ''}, ${minutesText(d.totalMinutes)} of run time.`;
   }
+  /** Query parameters of the Query logs screen showing the rows behind a number. */
+  protected logs(d: LogDrill): Record<string, unknown> {
+    return logsQuery(d);
+  }
+
+  protected openLogs(d: LogDrill): void {
+    this.router.navigate(['/logs'], { queryParams: logsQuery(d) });
+  }
+
+  /** Q2 bars: recurring / new rows of the day in Query logs; patterns run more than once: the Query groups screen. */
+  protected openQ2(d: DailyInsight, r: BarRow): void {
+    if (r.key === 'GROUPS') this.router.navigate(['/groups']);
+    else this.openLogs({ day: d.date, pattern: r.key as 'RECURRING' | 'NEW' });
+  }
+
   protected q2Rows(d: DailyInsight): BarRow[] {
     return [
-      { label: 'Recurring queries', value: d.recurringQueries, sub: `${d.recurringPatterns} patterns seen on earlier days` },
-      { label: 'Queries of new patterns', value: d.badQueries - d.recurringQueries, sub: `${d.newPatterns} patterns first seen this day` },
-      { label: 'Patterns run more than once this day', value: d.repeatedTodayPatterns },
+      { label: 'Recurring queries', value: d.recurringQueries, sub: `${d.recurringPatterns} patterns seen on earlier days`, key: 'RECURRING' },
+      { label: 'Queries of new patterns', value: d.badQueries - d.recurringQueries, sub: `${d.newPatterns} patterns first seen this day`, key: 'NEW' },
+      { label: 'Patterns run more than once this day', value: d.repeatedTodayPatterns, key: 'GROUPS' },
     ];
   }
   protected readonly q3Buckets = computed(() =>
@@ -257,6 +274,7 @@ export class Insights {
   // ------------------------------------------------------------------ Q7, Q13
   protected q7GroupRows(u: UsersInsight): BarRow[] {
     return u.groups.slice(0, 10).map((g) => ({
+      key: g.userGroup,
       label: g.userGroup,
       value: g.badQueries,
       sub: `${g.users} users · ${g.patterns} patterns`,
@@ -265,6 +283,7 @@ export class Insights {
   }
   protected q7UserRows(u: UsersInsight): BarRow[] {
     return u.users.slice(0, 10).map((x) => ({
+      key: x.userId,
       label: x.displayName ? `${x.displayName} (${x.userId})` : x.userId,
       value: x.badQueries,
       sub: x.userGroup ?? 'no user group',

@@ -92,6 +92,8 @@ export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+export type CaptureStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED';
+
 export interface Tracker {
   trackerId: number;
   groupId: number;
@@ -170,6 +172,11 @@ export interface Tracker {
   createdBy: string | null;
   updatedAt: string | null;
   updatedBy: string | null;
+  /** automatic explain / profile / DDL fetch started when the item was tracked (null: tracked before it existed) */
+  captureStatus: CaptureStatus | null;
+  captureRequestedAt: string | null;
+  captureFinishedAt: string | null;
+  captureMessage: string | null;
   version: number;
   customFields: Record<string, string>;
 }
@@ -633,4 +640,10 @@ export interface DashboardSummary {
     sampleQuery: string | null;
   }[];
   savedMinutesPerRun: number | null;
+}
+
+/** One group of a server-side row grouping: the column value (null = empty) and its row count. */
+export interface Bucket {
+  key: string | number | null;
+  count: number;
 }

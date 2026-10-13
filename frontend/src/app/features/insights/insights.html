@@ -72,7 +72,14 @@
             [table]="{ headers: ['Day', 'Bad queries'], rows: d.last14Days.map(x => [x.label, x.count]) }"
             note="One bad query = one row of the daily bad query injection, dated by its start time."
           >
-            <app-column-chart [data]="q1Days()" [highlight]="13" unit="bad queries" ariaLabel="Bad queries, last 14 days" />
+            <app-column-chart
+              [data]="q1Days()"
+              [highlight]="13"
+              unit="bad queries"
+              ariaLabel="Bad queries, last 14 days"
+              [clickable]="true"
+              (pick)="openLogs({ day: d.last14Days[$event].label })"
+            />
           </app-chart-card>
 
           <app-chart-card
@@ -83,7 +90,7 @@
             [table]="tableOf(q2Rows(d), 'Count')"
             note="Recurring = the query's pattern (same SQL ignoring filters) was seen before this day."
           >
-            <app-bar-list [rows]="q2Rows(d)" />
+            <app-bar-list [rows]="q2Rows(d)" [clickable]="true" (pick)="openQ2(d, $event)" />
           </app-chart-card>
 
           <app-chart-card
@@ -100,8 +107,12 @@
               @for (p of d.topPatterns.slice(0, 6); track p.groupId) {
                 <tr class="clickable" [routerLink]="p.trackerId ? ['/tracker', p.trackerId] : ['/groups', p.groupId]">
                   <td class="item-cell"><span class="mono">#{{ p.groupId }}</span> <span class="sql">{{ p.sqlSnippet }}</span></td>
-                  <td class="num">{{ num(p.count) }}</td>
-                  <td class="num">{{ num(p.totalInstances) }}</td>
+                  <td class="num">
+                    <a class="link" [routerLink]="['/logs']" [queryParams]="logs({ day: d.date, groupId: p.groupId })" (click)="$event.stopPropagation()" matTooltip="Open in Query logs">{{ num(p.count) }}</a>
+                  </td>
+                  <td class="num">
+                    <a class="link" [routerLink]="['/logs']" [queryParams]="logs({ groupId: p.groupId })" (click)="$event.stopPropagation()" matTooltip="Open in Query logs">{{ num(p.totalInstances) }}</a>
+                  </td>
                   <td>@if (p.status) {<app-status [value]="p.status" />} @else {<span class="muted">not tracked</span>}</td>
                 </tr>
               }
@@ -115,7 +126,14 @@
             [answer]="q8Answer(d)"
             [table]="{ headers: ['Hour', 'Bad queries'], rows: d.byHour.map(h => [h.label + ':00', h.count]) }"
           >
-            <app-column-chart [data]="q8Hours()" [highlight]="d.peakHour" unit="bad queries" ariaLabel="Bad queries by hour" />
+            <app-column-chart
+              [data]="q8Hours()"
+              [highlight]="d.peakHour"
+              unit="bad queries"
+              ariaLabel="Bad queries by hour"
+              [clickable]="true"
+              (pick)="openLogs({ day: d.date, hour: $event })"
+            />
           </app-chart-card>
         </div>
       }
@@ -299,9 +317,9 @@
             [note]="u.unmappedUsers ? u.unmappedUsers + ' users have no user group yet. Map them under Administration → Users & groups.' : null"
           >
             <div class="sub-title">By user group</div>
-            <app-bar-list [rows]="q7GroupRows(u)" />
+            <app-bar-list [rows]="q7GroupRows(u)" [clickable]="true" (pick)="openLogs({ from: from, to: to, userGroup: '' + $event.key })" />
             <div class="sub-title">Top users</div>
-            <app-bar-list [rows]="q7UserRows(u)" [slot]="2" />
+            <app-bar-list [rows]="q7UserRows(u)" [slot]="2" [clickable]="true" (pick)="openLogs({ from: from, to: to, user: '' + $event.key })" />
           </app-chart-card>
 
           <app-chart-card
@@ -315,7 +333,7 @@
             <table class="simple">
               <tr><th>User</th><th class="num">Bad queries</th><th class="num">Patterns</th><th class="num">Consistency</th><th></th></tr>
               @for (x of u.users.slice(0, 12); track x.userId) {
-                <tr class="clickable" [routerLink]="['/logs']" [queryParams]="{ userId: x.userId }">
+                <tr class="clickable" [routerLink]="['/logs']" [queryParams]="logs({ from: from, to: to, user: x.userId })" title="Open this user's bad queries of the period in Query logs">
                   <td>
                     {{ x.displayName ?? x.userId }}
                     <div class="muted small">{{ x.userGroup ?? 'no user group' }}</div>

@@ -52,7 +52,8 @@
   }
 }
 
-.facts dl {
+.facts dl,
+.facts-list {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 6px 16px;
@@ -224,4 +225,18 @@
   border-radius: 10px;
   background: var(--spt-accent-soft);
   font-size: 13px;
+}
+
+.facts-list {
+  .bad {
+    color: var(--spt-bad);
+  }
+
+  .info {
+    color: var(--spt-info);
+  }
+}
+
+.tab-body > .grid-2 {
+  margin-bottom: 16px;
 }

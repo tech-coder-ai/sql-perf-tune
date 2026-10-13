@@ -11,7 +11,9 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface TuningTrackerRepository extends JpaRepository<TuningTracker, Long>, JpaSpecificationExecutor<TuningTracker> {
 
@@ -35,4 +37,22 @@ public interface TuningTrackerRepository extends JpaRepository<TuningTracker, Lo
 
     @Query("select t.workflowStatus as status, count(t) as count from TuningTracker t group by t.workflowStatus")
     List<StatusCount> countByStatus();
+
+    List<TuningTracker> findByCaptureStatusIn(Collection<TuningTracker.CaptureStatus> statuses);
+
+    /**
+     * Capture bookkeeping as a bulk update: it does not bump the row version, so an edit the user started
+     * while the capture ran still saves.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update TuningTracker t set t.captureStatus = :status, t.captureFinishedAt = :finishedAt,"
+            + " t.captureMessage = :message where t.id = :id")
+    int setCapture(@Param("id") Long id, @Param("status") TuningTracker.CaptureStatus status,
+                   @Param("finishedAt") java.time.LocalDateTime finishedAt, @Param("message") String message);
+
+    @Modifying(flushAutomatically = true)
+    @Query("update TuningTracker t set t.captureStatus = :status, t.captureRequestedAt = :requestedAt,"
+            + " t.captureFinishedAt = null, t.captureMessage = null where t.id = :id")
+    int requestCapture(@Param("id") Long id, @Param("status") TuningTracker.CaptureStatus status,
+                       @Param("requestedAt") java.time.LocalDateTime requestedAt);
 }

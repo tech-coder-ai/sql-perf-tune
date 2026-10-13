@@ -21,15 +21,16 @@ import {
   serverGridOptions,
   minutesFormatter,
   numCol,
-  pagedDatasource,
+  groupingDatasource,
+  isGroupRow,
   pctFormatter,
   secondsFormatter,
   sqlCol,
   tsFormatter,
 } from '../../shared/grid';
-import { TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
+import { GROUPABLE, TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
 
-const STATE_KEY = 'tracker.grid.v3';
+const STATE_KEY = 'tracker.grid.v4';
 
 @Component({
   selector: 'app-tracker',
@@ -65,6 +66,7 @@ export class TrackerList {
     onColumnResized: (e) => e.finished && this.saveState(),
     onColumnVisible: () => this.saveState(),
     onColumnPinned: () => this.saveState(),
+    onColumnRowGroupChanged: () => this.saveState(),
   };
 
   private readonly sortMap: Record<string, string> = Object.fromEntries(
@@ -125,6 +127,7 @@ export class TrackerList {
       headerName: c.label,
       hide: !c.visible,
       sortable: !!c.sort,
+      enableRowGroup: GROUPABLE.has(c.key),
       valueGetter: (p) => (p.data ? cellValue(p.data, c.key) : undefined),
     };
     switch (c.kind) {
@@ -190,8 +193,11 @@ export class TrackerList {
     this.restoreState();
     e.api.setGridOption(
       'serverSideDatasource',
-      pagedDatasource(
-        (page, size, sort) => this.api.trackers({ ...this.params(), page, size, sort }),
+      groupingDatasource<Tracker>(
+        {
+          rows: (page, size, sort, gk) => this.api.trackers({ ...this.params(), page, size, sort, gk }),
+          buckets: (by, page, size, sort, gk) => this.api.buckets('tracker', { ...this.params(), by, page, size, sort, gk }),
+        },
         this.sortMap,
         (total) => this.total.set(total),
       ),
@@ -227,7 +233,14 @@ export class TrackerList {
     if (!this.grid) return;
     savePref(
       STATE_KEY,
-      this.grid.getColumnState().map(({ colId, hide, width, pinned }) => ({ colId, hide, width, pinned })),
+      this.grid.getColumnState().map(({ colId, hide, width, pinned, rowGroup, rowGroupIndex }) => ({
+        colId,
+        hide,
+        width,
+        pinned,
+        rowGroup,
+        rowGroupIndex,
+      })),
     );
   }
 
@@ -239,7 +252,7 @@ export class TrackerList {
   }
 
   open(e: RowClickedEvent<Tracker>): void {
-    if (e.data) this.router.navigate(['/tracker', e.data.trackerId]);
+    if (e.data && !isGroupRow(e.data)) this.router.navigate(['/tracker', e.data.trackerId]);
   }
 
   exportXlsx(): void {

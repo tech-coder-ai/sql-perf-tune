@@ -12,7 +12,7 @@ import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
 import { QueryGroup } from '../../core/models';
-import { LinkCell, errorCellRules, minutesFormatter, numCol, pagedDatasource, serverGridOptions, sqlCol } from '../../shared/grid';
+import { LinkCell, errorCellRules, groupingDatasource, isGroupRow, minutesFormatter, numCol, serverGridOptions, sqlCol } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupDetailRow } from './group-detail-row';
 
@@ -32,7 +32,7 @@ export class TrackerCell implements ICellRendererAngularComp {
   row: QueryGroup | null = null;
   private parent!: Groups;
   agInit(p: ICellRendererParams<QueryGroup>): void {
-    this.row = p.data ?? null;
+    this.row = p.data && !isGroupRow(p.data) ? p.data : null;
     this.parent = p.context;
   }
   refresh(p: ICellRendererParams<QueryGroup>): boolean {
@@ -78,12 +78,18 @@ export class Groups {
   readonly gridOptions: GridOptions<QueryGroup> = {
     ...serverGridOptions<QueryGroup>(25),
     context: this,
-    getRowId: (p) => String(p.data.groupId),
+    // group rows of a row grouping have no groupId: their id is the path of keys
+    getRowId: (p) => (isGroupRow(p.data) ? 'g:' + [...p.parentKeys ?? [], (p.data as unknown as Record<string, string>)['__key']].join('/') : String(p.data.groupId)),
     masterDetail: true,
-    isRowMaster: () => true,
+    isRowMaster: (d) => !isGroupRow(d),
     detailCellRenderer: GroupDetailRow,
     detailRowHeight: 520,
-    rowSelection: { mode: 'multiRow', checkboxes: true, headerCheckbox: false, enableClickSelection: false },
+    rowSelection: {
+      mode: 'multiRow',
+      checkboxes: (p) => !p.node.group && !isGroupRow(p.data),
+      headerCheckbox: false,
+      enableClickSelection: false,
+    },
     selectionColumnDef: { pinned: 'left', width: 48 },
   };
 
@@ -109,13 +115,16 @@ export class Groups {
       cellRenderer: LinkCell,
       cellRendererParams: { link: (r: QueryGroup) => ['/groups', r.groupId], text: (r: QueryGroup) => '#' + r.groupId },
     },
-    { colId: 'groupSize', field: 'groupSize', headerName: 'Group size', width: 115, sortable: true, ...numCol },
+    { colId: 'groupSize', field: 'groupSize', headerName: 'Group size', width: 115, sortable: true, enableRowGroup: true, ...numCol },
     {
       colId: 'distinctUsers',
+      field: 'distinctUsers',
+      enableRowGroup: true,
       headerName: 'User ID(s)',
       width: 240,
       sortable: true,
-      valueGetter: (p) => (p.data ? `${p.data.distinctUsers} · ${p.data.userIds ?? ''}` : ''),
+      valueGetter: (p) =>
+        !p.data ? '' : isGroupRow(p.data) ? p.data.distinctUsers : `${p.data.distinctUsers} · ${p.data.userIds ?? ''}`,
       tooltip: (p) => p.data?.userIds,
     },
     { colId: 'durationCount', field: 'durationCount', headerName: 'Duration count', width: 140, sortable: true, ...numCol },
@@ -145,6 +154,23 @@ export class Groups {
       tooltip: (p) => p.data?.fingerprint,
       valueFormatter: (p) => (p.value ? String(p.value).substring(0, 12) + '…' : ''),
     },
+    { colId: 'sqlEngine', field: 'sqlEngine', headerName: 'SQL engine', width: 120, hide: true, enableRowGroup: true },
+    {
+      colId: 'firstSeenDay',
+      headerName: 'First seen (day)',
+      width: 140,
+      hide: true,
+      enableRowGroup: true,
+      valueGetter: (p) => (p.data as unknown as Record<string, string> | undefined)?.['firstSeenDay'] ?? p.data?.firstSeen?.substring(0, 10),
+    },
+    {
+      colId: 'lastSeenDay',
+      headerName: 'Last seen (day)',
+      width: 140,
+      hide: true,
+      enableRowGroup: true,
+      valueGetter: (p) => (p.data as unknown as Record<string, string> | undefined)?.['lastSeenDay'] ?? p.data?.lastSeen?.substring(0, 10),
+    },
     { colId: 'tracker', headerName: 'Tracker', width: 175, pinned: 'right', cellRenderer: TrackerCell },
   ];
 
@@ -155,24 +181,26 @@ export class Groups {
     this.filter.tracked = this.route.snapshot.queryParamMap.get('tracked') ?? '';
     e.api.setGridOption(
       'serverSideDatasource',
-      pagedDatasource(
-        (page, size, sort) => {
-          const f = this.filter;
-          return this.api.groups({
-            page,
-            size,
-            sort: sort || 'totalDurationMinutes,desc',
-            q: f.q,
-            userId: f.userId,
-            minGroupSize: f.minGroupSize,
-            minAvgDuration: f.minAvgDuration,
-            tracked: f.tracked || null,
-          });
+      groupingDatasource<QueryGroup>(
+        {
+          rows: (page, size, sort, gk) => this.api.groups({ ...this.params(), page, size, gk, sort: sort || 'totalDurationMinutes,desc' }),
+          buckets: (by, page, size, sort, gk) => this.api.buckets('groups', { ...this.params(), by, page, size, sort, gk }),
         },
         {},
         (total) => this.total.set(total),
       ),
     );
+  }
+
+  private params(): Record<string, unknown> {
+    const f = this.filter;
+    return {
+      q: f.q,
+      userId: f.userId,
+      minGroupSize: f.minGroupSize,
+      minAvgDuration: f.minAvgDuration,
+      tracked: f.tracked || null,
+    };
   }
 
   search(): void {
@@ -190,7 +218,7 @@ export class Groups {
   }
 
   onSelection(): void {
-    this.selected.set((this.grid?.getSelectedRows() ?? []).map((r) => r.groupId));
+    this.selected.set((this.grid?.getSelectedRows() ?? []).filter((r) => !isGroupRow(r)).map((r) => r.groupId));
   }
 
   track(ids: number[]): void {

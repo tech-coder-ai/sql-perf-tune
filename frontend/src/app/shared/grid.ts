@@ -6,6 +6,7 @@ import {
   ClientSideRowModelModule,
   ColDef,
   ColumnApiModule,
+  ColumnAutoSizeModule,
   GetContextMenuItems,
   GridOptions,
   ICellRendererParams,
@@ -32,6 +33,8 @@ import {
   ContextMenuModule,
   ExcelExportModule,
   MasterDetailModule,
+  RowGroupingModule,
+  RowGroupingPanelModule,
   ServerSideRowModelApiModule,
   ServerSideRowModelModule,
   SideBarModule,
@@ -39,7 +42,7 @@ import {
 } from 'ag-grid-enterprise';
 import { Observable } from 'rxjs';
 import { LookupStore } from '../core/lookups';
-import { Page } from '../core/models';
+import { Bucket, Page } from '../core/models';
 import { formatMinutes } from './format';
 import { StatusChip } from './status-chip';
 
@@ -54,12 +57,15 @@ ModuleRegistry.registerModules([
   CellStyleModule,
   RowStyleModule,
   ColumnApiModule,
+  ColumnAutoSizeModule,
   RenderApiModule,
   RowApiModule,
   // enterprise
   ServerSideRowModelModule,
   ServerSideRowModelApiModule,
   MasterDetailModule,
+  RowGroupingModule,
+  RowGroupingPanelModule,
   SideBarModule,
   ColumnsToolPanelModule,
   ColumnMenuModule,
@@ -100,8 +106,23 @@ export const defaultColDef: ColDef = {
   resizable: true,
   filter: false,
   minWidth: 80,
-  // enterprise column menu: pin, autosize, choose columns (filters are server side, in the form above the grid)
-  mainMenuItems: ['pinSubMenu', 'separator', 'autoSizeThis', 'autoSizeAll', 'separator', 'columnChooser', 'resetColumns'],
+  // enterprise column menu (header menu button or right-click on the header): group by, pin, autosize, choose
+  // columns. Filters are server side, in the form above the grid. "Group by" shows on columns with enableRowGroup.
+  mainMenuItems: [
+    'rowGroup',
+    'rowUnGroup',
+    'separator',
+    'pinSubMenu',
+    'separator',
+    'autoSizeThis',
+    'autoSizeAll',
+    'separator',
+    'expandAll',
+    'contractAll',
+    'separator',
+    'columnChooser',
+    'resetColumns',
+  ],
 };
 
 /** Columns tool panel (show / hide / reorder) on the right of every large grid. */
@@ -113,7 +134,7 @@ export const columnsSideBar: SideBarDef = {
       labelKey: 'columns',
       iconKey: 'columns',
       toolPanel: 'agColumnsToolPanel',
-      toolPanelParams: { suppressRowGroups: true, suppressValues: true, suppressPivots: true, suppressPivotMode: true },
+      toolPanelParams: { suppressRowGroups: false, suppressValues: true, suppressPivots: true, suppressPivotMode: true },
     },
   ],
 };
@@ -156,8 +177,36 @@ export function serverGridOptions<T>(pageSize = 50): GridOptions<T> {
     cacheBlockSize: 100,
     maxBlocksInCache: 20,
     sideBar: columnsSideBar,
+    ...groupingOptions,
   };
 }
+
+/**
+ * Row grouping on the server-side grids: right-click a header → "Group by", or drag headers into the bar above the
+ * grid. Each level is counted by the server ({@link groupingDatasource}); opening a group loads its rows.
+ */
+const groupingOptions: GridOptions = {
+  rowGroupPanelShow: 'always',
+  groupDisplayType: 'singleColumn',
+  autoGroupColumnDef: { headerName: 'Group', minWidth: 220, pinned: 'left', sortable: true },
+  getChildCount: (data) => data?.[GROUP_COUNT],
+  // the raw value, not the column's display text (which may be formatted or combined with other fields)
+  getServerSideGroupKey: (data) => data?.[GROUP_KEY],
+  isServerSideGroup: (data) => data?.[GROUP_KEY] !== undefined,
+  // a grouped column stays visible (its values are still useful on the rows)
+  suppressGroupChangesColumnVisibility: 'suppressHideOnGroup',
+};
+
+/** Where a group row keeps its row count and its key. */
+const GROUP_COUNT = '__count';
+const GROUP_KEY = '__key';
+
+/** True for the rows of a row grouping level (not data rows). */
+export function isGroupRow(data: unknown): boolean {
+  return !!data && (data as Record<string, unknown>)[GROUP_KEY] !== undefined;
+}
+/** Shown for (and sent back as) the group of rows without a value. */
+export const EMPTY_GROUP = '(empty)';
 
 // ---------------------------------------------------------------- formatters
 
@@ -226,6 +275,68 @@ export function pagedDatasource<T>(
   };
 }
 
+/** A server-side grid that supports row grouping: the rows, and the groups of one column. */
+export interface GroupedSource<T> {
+  /** rows inside the opened groups ({@code gk}: parent group keys, see RowGrouping on the server) */
+  rows: (page: number, size: number, sort: string, gk: string[]) => Observable<Page<T>>;
+  /** groups of column {@code by} inside the opened groups */
+  buckets: (by: string, page: number, size: number, sort: string, gk: string[]) => Observable<Page<Bucket>>;
+}
+
+/**
+ * Server-side-row-model datasource with row grouping: while the grid asks for a grouping level it gets the column's
+ * distinct values and counts, below the last level it gets the rows. {@code onLoaded} reports the number of rows
+ * under the current filters (top level only).
+ */
+export function groupingDatasource<T>(
+  src: GroupedSource<T>,
+  sortMap: Record<string, string> = {},
+  onLoaded?: (total: number) => void,
+): IServerSideDatasource {
+  return {
+    getRows: (p: IServerSideGetRowsParams) => {
+      const r = p.request;
+      const start = r.startRow ?? 0;
+      const size = (r.endRow ?? start + 100) - start;
+      const page = Math.floor(start / size);
+      const levels = r.rowGroupCols;
+      const gk = r.groupKeys.map((k, i) => groupKeyParam(levels[i].field ?? levels[i].id, k));
+      if (r.groupKeys.length < levels.length) {
+        const by = levels[r.groupKeys.length].field ?? levels[r.groupKeys.length].id;
+        const s = r.sortModel.find((m) => m.colId === by || m.colId.startsWith('ag-Grid-AutoColumn'));
+        src.buckets(by, page, size, s ? `${by},${s.sort}` : '', gk).subscribe({
+          next: (res) => {
+            p.success({
+              rowData: res.content.map((b) => ({
+                [by]: b.key ?? EMPTY_GROUP,
+                [GROUP_COUNT]: b.count,
+                [GROUP_KEY]: b.key === null ? EMPTY_GROUP : String(b.key),
+              })),
+              rowCount: res.totalElements,
+            });
+            if (gk.length === 0) onLoaded?.(res.content.reduce((n, b) => n + b.count, 0));
+          },
+          error: () => p.fail(),
+        });
+        return;
+      }
+      const sort = r.sortModel.filter((m) => !m.colId.startsWith('ag-Grid-AutoColumn'));
+      src.rows(page, size, toServerSort(sort, sortMap), gk).subscribe({
+        next: (res) => {
+          p.success({ rowData: res.content, rowCount: res.totalElements });
+          if (gk.length === 0) onLoaded?.(res.totalElements);
+        },
+        error: () => p.fail(),
+      });
+    },
+  };
+}
+
+/** {@code column:value}, or {@code column!} for the group of rows without a value. */
+function groupKeyParam(column: string, key: unknown): string {
+  return key === null || key === undefined || key === '' || key === EMPTY_GROUP ? `${column}!` : `${column}:${key}`;
+}
+
 // ---------------------------------------------------------------- cell renderers
 
 export interface StatusCellParams {
@@ -286,7 +397,8 @@ export class LinkCell implements ICellRendererAngularComp {
   href = '';
 
   agInit(p: ICellRendererParams & LinkCellParams): void {
-    this.commands = p.data ? p.link(p.data as never) : null;
+    // rows of a row grouping level only carry the grouped value: no link
+    this.commands = p.data && !isGroupRow(p.data) ? p.link(p.data as never) : null;
     this.text = p.data && p.text ? p.text(p.data as never) : String(p.value ?? '');
     this.tooltip = p.tooltip ?? '';
     this.queryParams = p.query && p.data ? p.query(p.data as never) : undefined;

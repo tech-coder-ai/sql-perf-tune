@@ -10,6 +10,7 @@ import { DailyInsight, PipelineInsight, SavingsInsight, WorkflowStatus } from '.
 import { STAGE, STAGE_ORDER } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, StatTile } from '../../shared/charts';
 import { addDays, minutesText, num, pct, signedPct, today } from '../../shared/dates';
+import { LogDrill, logsQuery } from '../../shared/drill';
 import { StatusChip } from '../../shared/status-chip';
 
 /** Command center: today's bad queries and where the tuning backlog stands (Q1, Q2, Q3, Q5, Q6, Q8, Q15). */
@@ -90,6 +91,15 @@ export class Home {
       this.pipeline.set(r.pipeline);
       this.savings.set(r.savings);
     });
+  }
+
+  /** Query parameters of the Query logs screen showing the rows behind a number. */
+  protected logs(d: LogDrill): Record<string, unknown> {
+    return logsQuery(d);
+  }
+
+  protected openLogs(d: LogDrill): void {
+    this.router.navigate(['/logs'], { queryParams: logsQuery(d) });
   }
 
   protected stageCount(p: PipelineInsight, status: WorkflowStatus): number {

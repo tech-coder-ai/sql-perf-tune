@@ -38,7 +38,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * Detected -> tracked -> diagnosed -> two iterations -> best selected -> one rejected by users -> adopted,
  * then every analytics endpoint over that data.
  */
-@SpringBootTest
+@SpringBootTest(properties = "spt.diagnostics.auto-capture=false")
 class TuningLifecycleTest {
 
     @TempDir
