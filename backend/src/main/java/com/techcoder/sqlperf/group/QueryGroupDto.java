@@ -26,13 +26,17 @@ public record QueryGroupDto(
         LocalDateTime lastSeen,
         Long trackerId,
         String workflowStatus,
-        Map<String, String> customFields) {
+        Map<String, String> customFields,
+        long badRuns,
+        PatternClassifier.PatternClass patternClass) {
 
-    public static QueryGroupDto of(QueryGroup g, Long trackerId, String workflowStatus, Map<String, String> custom) {
+    public static QueryGroupDto of(QueryGroup g, Long trackerId, String workflowStatus, Map<String, String> custom,
+                                   long badRuns, PatternClassifier.PatternClass patternClass) {
         return new QueryGroupDto(g.getId(), g.getFingerprint(), g.getSqlEngine(), g.getGroupSize(), g.getDistinctUsers(),
                 g.getUserIds(), g.getDurationCount(), g.getAvgDurationMinutes(), g.getMinDurationMinutes(),
                 g.getMaxDurationMinutes(), g.getTotalDurationMinutes(), g.getErrorCount(), g.getSampleLogId(),
                 g.getSampleQuerySeqId(), g.getSampleQuery(), g.getNormalizedQuery(), g.getRowIndices(),
-                g.getFirstSeen(), g.getLastSeen(), trackerId, workflowStatus, custom == null ? Map.of() : custom);
+                g.getFirstSeen(), g.getLastSeen(), trackerId, workflowStatus, custom == null ? Map.of() : custom,
+                badRuns, patternClass);
     }
 }

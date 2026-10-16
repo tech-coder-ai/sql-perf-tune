@@ -299,9 +299,71 @@ public class TrackerService {
         t.setStageChangedAt(now);
         t.setCreatedBy(CurrentUser.name());
         TuningTracker saved = trackers.save(t);
+        saved.setDiagnosticId(diagnosticId(saved.getId()));
         audit.created(AUDIT_TYPE, saved.getId());
         events.publishEvent(new TrackerCreated(saved));
         return saved;
+    }
+
+    // ------------------------------------------------------------------ evaluate error (step 13-14)
+
+    /**
+     * RCA exception: nothing more can be done for this SQL. It leaves the queues, is never sent to the agent again,
+     * and keeps the reason and who decided (so later questions go to that person).
+     */
+    @Transactional
+    public TrackerDto markException(Long id, String reason) {
+        if (Texts.isBlank(reason)) {
+            throw new IllegalArgumentException("Give the reason for the tuning exception");
+        }
+        TuningTracker t = find(id);
+        audit.changed(AUDIT_TYPE, id, "exceptionReason", t.getExceptionReason(), reason.trim());
+        t.setExceptionReason(Texts.truncate(reason.trim(), 2000));
+        t.setExceptionBy(CurrentUser.name());
+        t.setExceptionAt(LocalDateTime.now());
+        changeStatus(t, WorkflowStatus.TUNING_EXCEPTION);
+        touchUpdated(t);
+        return dto(t);
+    }
+
+    /** The root cause is architectural: wait for the theme's fix, then retry (steps 14-15). */
+    @Transactional
+    public TrackerDto markAwaitingFix(Long id, String theme, String rootCause) {
+        if (Texts.isBlank(theme)) {
+            throw new IllegalArgumentException("Choose the theme whose fix this SQL waits for");
+        }
+        lookups.validate("THEME", "theme", theme.trim());
+        TuningTracker t = find(id);
+        if (!Objects.equals(t.getTheme(), theme.trim())) {
+            audit.changed(AUDIT_TYPE, id, "theme", t.getTheme(), theme.trim());
+            t.setTheme(theme.trim());
+        }
+        if (!Texts.isBlank(rootCause)) {
+            audit.changed(AUDIT_TYPE, id, "rootCause", t.getRootCause(), rootCause.trim());
+            t.setRootCause(rootCause.trim());
+        }
+        changeStatus(t, WorkflowStatus.AWAITING_FIX);
+        touchUpdated(t);
+        return dto(t);
+    }
+
+    /** Back to tuning (from an exception, awaiting fix, on hold ...). */
+    @Transactional
+    public TrackerDto reopen(Long id) {
+        TuningTracker t = find(id);
+        changeStatus(t, WorkflowStatus.OPTIMIZATION_REQUESTED);
+        touchUpdated(t);
+        return dto(t);
+    }
+
+    private static void touchUpdated(TuningTracker t) {
+        t.setUpdatedAt(LocalDateTime.now());
+        t.setUpdatedBy(CurrentUser.name());
+    }
+
+    /** Correlation id used with the diagnostics process and the Cloudera team, e.g. DX-000123. */
+    public static String diagnosticId(Long trackerId) {
+        return String.format("DX-%06d", trackerId);
     }
 
     // ------------------------------------------------------------------ update

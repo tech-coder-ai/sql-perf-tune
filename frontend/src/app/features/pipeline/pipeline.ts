@@ -12,7 +12,7 @@ import { Api } from '../../core/api';
 import { LookupStore } from '../../core/lookups';
 import { BoardCard, PRIORITIES, REQUEST_SOURCES, WorkflowStatus } from '../../core/models';
 import { loadPref, savePref } from '../../core/prefs';
-import { REQUEST_SOURCE_LABEL, STAGE, STAGE_ORDER } from '../../core/stages';
+import { REQUEST_SOURCE_LABEL, SIDE_STAGES, STAGE, STAGE_ORDER } from '../../core/stages';
 import { minutesText } from '../../shared/dates';
 import { StatusChip } from '../../shared/status-chip';
 
@@ -56,8 +56,8 @@ export class Pipeline {
 
   protected readonly columns = computed<Column[]>(() => {
     const order: WorkflowStatus[] = this.showClosed()
-      ? [...STAGE_ORDER, 'ON_HOLD', 'REJECTED']
-      : (STAGE_ORDER.filter((s) => s !== 'ADOPTED') as WorkflowStatus[]).concat(['ON_HOLD']);
+      ? [...STAGE_ORDER, ...SIDE_STAGES]
+      : (STAGE_ORDER.filter((s) => s !== 'ADOPTED') as WorkflowStatus[]).concat(['ON_HOLD', 'AWAITING_FIX']);
     return order.map((status) => {
       const cards = this.cards().filter((c) => c.status === status);
       const ages = cards.map((c) => c.daysInStage ?? 0);

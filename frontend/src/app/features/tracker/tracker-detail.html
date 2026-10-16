@@ -6,7 +6,13 @@
       <div class="head-text">
         <h1>
           T-{{ t.trackerId }}
+          @if (t.diagnosticId) {
+            <span class="diag-id" matTooltip="Diagnostic ID: the correlation id with the diagnostics process and the Cloudera team">{{ t.diagnosticId }}</span>
+          }
           <app-status [value]="t.workflowStatus" />
+          @if (t.resultStatus) {
+            <app-status [value]="t.resultStatus" />
+          }
           <app-status [value]="t.priority" />
           @if (t.requestSource !== 'LOG_DETECTED') {
             <app-status [value]="t.requestSource" />
@@ -26,7 +32,18 @@
         }
         @case ('ADOPTED') {}
         @case ('REJECTED') {}
+        @case ('TUNING_EXCEPTION') {
+          <button mat-stroked-button (click)="reopen()"><mat-icon>undo</mat-icon> Reopen for tuning</button>
+        }
+        @case ('AWAITING_FIX') {
+          <button mat-stroked-button (click)="reopen()"><mat-icon>undo</mat-icon> Reopen for tuning</button>
+        }
         @default {
+          <button mat-stroked-button [matMenuTriggerFor]="evalMenu" matTooltip="Step 13: the SQL cannot be tuned (enough)"><mat-icon>report</mat-icon> Evaluate error</button>
+          <mat-menu #evalMenu="matMenu">
+            <button mat-menu-item (click)="evaluate('fix')"><mat-icon>construction</mat-icon> Waits for an architectural fix…</button>
+            <button mat-menu-item (click)="evaluate('exception')"><mat-icon>do_not_disturb_on</mat-icon> Tuning exception…</button>
+          </mat-menu>
           <a mat-stroked-button [routerLink]="['/groups', t.groupId]"><mat-icon>troubleshoot</mat-icon> Diagnostics & AI agent</a>
           <button mat-stroked-button class="nowrap" (click)="startNewIteration()"><mat-icon>add</mat-icon> Add iteration</button>
           @if (best(); as b) {
@@ -49,6 +66,25 @@
       <!-- ======================================================== 1. OVERVIEW -->
       <mat-tab label="Overview">
         <div class="tab-body">
+          @if (t.autoRunStatus) {
+            <div class="auto-run" [class.busy]="t.autoRunStatus === 'PENDING' || t.autoRunStatus === 'RUNNING'" [class.failed]="t.autoRunStatus === 'FAILED'" role="status">
+              @if (t.autoRunStatus === 'PENDING' || t.autoRunStatus === 'RUNNING') {
+                <mat-spinner diameter="20" />
+              } @else {
+                <mat-icon>{{ t.autoRunStatus === 'FAILED' ? 'error' : 'smart_toy' }}</mat-icon>
+              }
+              <span>
+                <b>Automatic first round{{ t.autoRunStatus === 'DONE' ? ' finished' : t.autoRunStatus === 'FAILED' ? ' stopped' : ' in progress' }}:</b>
+                {{ t.autoRunMessage }}
+              </span>
+            </div>
+          }
+          @if (t.workflowStatus === 'TUNING_EXCEPTION') {
+            <div class="auto-run failed" role="status">
+              <mat-icon>do_not_disturb_on</mat-icon>
+              <span><b>Tuning exception</b> since {{ t.exceptionAt | ts }} by {{ t.exceptionBy }}: {{ t.exceptionReason }}. Not sent to the agent any more.</span>
+            </div>
+          }
           <app-capture-status
             [status]="t.captureStatus"
             [requestedAt]="t.captureRequestedAt"
@@ -101,6 +137,21 @@
             <div class="span-2">
               <app-sql-block [text]="t.sampleQueryFormatted || t.sampleQueryRaw" label="Original (sample) query" maxHeight="280px" />
             </div>
+            @if (notifications().length) {
+              <div class="card span-2">
+                <div class="card-title">E-mails</div>
+                <table class="simple">
+                  @for (n of notifications(); track n.id) {
+                    <tr>
+                      <td class="nowrap">{{ n.createdAt | ts }}</td>
+                      <td><app-status [value]="n.kind" /></td>
+                      <td>{{ n.recipients || '—' }}</td>
+                      <td><app-status [value]="n.status" /></td>
+                    </tr>
+                  }
+                </table>
+              </div>
+            }
           </div>
         </div>
       </mat-tab>
@@ -218,6 +269,18 @@
             <mat-form-field class="span-all"><mat-label>Problem</mat-label><textarea matInput rows="3" name="problem" [(ngModel)]="m.problem"></textarea></mat-form-field>
             <mat-form-field class="span-all"><mat-label>Changes</mat-label><textarea matInput rows="4" name="changes" [(ngModel)]="m.changes"></textarea></mat-form-field>
             <mat-form-field class="span-all"><mat-label>Recommendations</mat-label><textarea matInput rows="3" name="recommendations" [(ngModel)]="m.recommendations"></textarea></mat-form-field>
+          </div>
+
+          <div class="section-title">Root-cause analysis (tuning team)</div>
+          <div class="form-grid">
+            <mat-form-field class="span-all">
+              <mat-label>Root cause</mat-label>
+              <textarea matInput rows="3" name="rootCause" [(ngModel)]="m.rootCause" placeholder="Why this SQL is not getting tuned (e.g. table design)"></textarea>
+            </mat-form-field>
+            <mat-form-field class="span-all">
+              <mat-label>Improve the prompt / agent</mat-label>
+              <textarea matInput rows="2" name="promptImprovement" [(ngModel)]="m.promptImprovement" placeholder="What the prompt should cover so the agent can tune such SQL next time"></textarea>
+            </mat-form-field>
           </div>
 
           @if (customFields().length) {

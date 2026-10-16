@@ -34,6 +34,12 @@ import {
   Tracker,
   Bucket,
   AgentInfo,
+  SettingValue,
+  NotificationRow,
+  NotificationFull,
+  WorkQueues,
+  ThemeFix,
+  WorkflowInsight,
 } from './models';
 
 export type Params = Record<string, string | number | boolean | readonly string[] | null | undefined>;
@@ -187,6 +193,46 @@ export class Api {
   /** Runs the iteration's SQL on the engine and records the test; returns the item's iterations. */
   testIteration(trackerId: number, id: number): Observable<Iteration[]> {
     return this.http.post<Iteration[]>(`/api/tracker/${trackerId}/iterations/${id}/test`, null);
+  }
+  // ----- tuning workflow
+  settings(): Observable<SettingValue[]> {
+    return this.http.get<SettingValue[]>('/api/settings');
+  }
+  saveSettings(values: Record<string, string>): Observable<SettingValue[]> {
+    return this.http.put<SettingValue[]>('/api/settings', values);
+  }
+  notifications(page = 0, size = 100): Observable<Page<NotificationRow>> {
+    return this.http.get<Page<NotificationRow>>('/api/notifications', { params: toParams({ page, size }) });
+  }
+  notification(id: number): Observable<NotificationFull> {
+    return this.http.get<NotificationFull>(`/api/notifications/${id}`);
+  }
+  trackerNotifications(trackerId: number): Observable<NotificationRow[]> {
+    return this.http.get<NotificationRow[]>(`/api/notifications/tracker/${trackerId}`);
+  }
+  runAutoRound(): Observable<{ tracked: number; trackerIds: number[] }> {
+    return this.http.post<{ tracked: number; trackerIds: number[] }>('/api/auto-run', null);
+  }
+  queues(): Observable<WorkQueues> {
+    return this.http.get<WorkQueues>('/api/queues');
+  }
+  themeFixes(): Observable<ThemeFix[]> {
+    return this.http.get<ThemeFix[]>('/api/auto-run/theme-fixes');
+  }
+  releaseThemeFix(theme: string, notes: string): Observable<ThemeFix> {
+    return this.http.post<ThemeFix>('/api/auto-run/theme-fixes', { theme, notes });
+  }
+  markException(id: number, reason: string): Observable<Tracker> {
+    return this.http.post<Tracker>(`/api/tracker/${id}/exception`, { reason });
+  }
+  markAwaitingFix(id: number, theme: string, rootCause: string): Observable<Tracker> {
+    return this.http.post<Tracker>(`/api/tracker/${id}/awaiting-fix`, { theme, rootCause });
+  }
+  reopen(id: number): Observable<Tracker> {
+    return this.http.post<Tracker>(`/api/tracker/${id}/reopen`, null);
+  }
+  workflowInsight(date: string): Observable<WorkflowInsight> {
+    return this.http.get<WorkflowInsight>('/api/insights/workflow', { params: toParams({ date }) });
   }
   agent(): Observable<AgentInfo> {
     return this.http.get<AgentInfo>('/api/agent');

@@ -63,12 +63,18 @@ public class MockLlm {
         sql = sql == null ? "" : sql.strip();
         List<String> notes = new ArrayList<>();
         int expected = 0;
-        for (Rewrite w : PLAN.get(attempt % PLAN.size())) {
-            String next = apply(w, sql);
-            if (!next.equals(sql)) {
-                sql = next;
-                notes.add(note(w));
-                expected += gain(w);
+        // this attempt's rewrites; when none applies to the SQL, the next set that does (as a model would)
+        String original = sql;
+        for (int k = 0; k < PLAN.size() && notes.isEmpty(); k++) {
+            sql = original;
+            expected = 0;
+            for (Rewrite w : PLAN.get((attempt + k) % PLAN.size())) {
+                String next = apply(w, sql);
+                if (!next.equals(sql)) {
+                    sql = next;
+                    notes.add(note(w));
+                    expected += gain(w);
+                }
             }
         }
         if (notes.isEmpty()) {

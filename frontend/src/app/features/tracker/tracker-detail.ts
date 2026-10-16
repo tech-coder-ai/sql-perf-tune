@@ -7,6 +7,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -18,6 +19,7 @@ import { LookupStore } from '../../core/lookups';
 import {
   AgentInfo,
   AuditEvent,
+  NotificationRow,
   CustomField,
   Iteration,
   Journey,
@@ -40,6 +42,7 @@ import { SqlDiff } from '../../shared/sql-diff';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupMembers } from '../groups/group-members';
 import { DecisionDialog, DecisionData } from './decision-dialog';
+import { EvaluateData, EvaluateDialog, EvaluateResult } from './evaluate-dialog';
 
 /** A SQL that can be compared: the original, an iteration, or the tracker's optimized query. */
 interface CompareOption {
@@ -77,6 +80,8 @@ const STAGE_TAB: Record<WorkflowStatus, number> = {
   ADOPTED: TAB.results,
   REJECTED: TAB.results,
   ON_HOLD: TAB.results,
+  TUNING_EXCEPTION: TAB.overview,
+  AWAITING_FIX: TAB.overview,
 };
 
 /** Dropdown-backed tracker fields: property -> lookup category + label. */
@@ -108,6 +113,7 @@ const DROPDOWNS: { field: keyof Tracker; category: string; label: string }[] = [
     MatIconModule,
     MatTooltipModule,
     MatProgressSpinnerModule,
+    MatMenuModule,
     SqlBlock,
     SqlDiff,
     CaptureStatusBanner,
@@ -152,6 +158,8 @@ export class TrackerDetail implements OnInit {
   protected readonly history = signal<AuditEvent[]>([]);
   protected readonly customFields = signal<CustomField[]>([]);
   protected readonly diagnostics = signal<SqlDiagnostic[]>([]);
+  /** e-mails sent (or recorded) for this item */
+  protected readonly notifications = signal<NotificationRow[]>([]);
   protected readonly ddls = signal<TableDdl[]>([]);
   /** latest captured diagnostic of the original SQL */
   protected readonly originalDiag = computed(
@@ -304,6 +312,7 @@ export class TrackerDetail implements OnInit {
     this.api.journey(id).subscribe((j) => this.journey.set(j));
     this.api.iterations(id).subscribe((i) => this.iterations.set(i));
     this.api.trackerHistory(id).subscribe((h) => this.history.set(h));
+    this.api.trackerNotifications(id).subscribe((n) => this.notifications.set(n));
   }
 
   private loadDiagnostics(groupId: number): void {
@@ -324,27 +333,54 @@ export class TrackerDetail implements OnInit {
   }
 
   /** While the capture runs, re-read the item; when it ends, bring in what it filled without losing unsaved edits. */
+  /** Capture or automatic round still running: keep re-reading the item. */
+  private busy(t: Tracker): boolean {
+    return (
+      t.captureStatus === 'PENDING' ||
+      t.captureStatus === 'RUNNING' ||
+      t.autoRunStatus === 'PENDING' ||
+      t.autoRunStatus === 'RUNNING'
+    );
+  }
+
+  /**
+   * While the capture or the automatic first round runs, re-read the item; whenever it moved on (stage, capture,
+   * iterations, routing) bring the new values in without losing unsaved edits.
+   */
   private pollWhileCapturing(t: Tracker): void {
     this.stopPolling();
-    if (t.captureStatus !== 'PENDING' && t.captureStatus !== 'RUNNING') return;
+    if (!this.busy(t)) return;
     this.pollTimer = setTimeout(() => {
       this.api.tracker(t.trackerId).subscribe((fresh) => {
         const before = this.saved();
         if (!before) return;
-        if (fresh.captureStatus === 'PENDING' || fresh.captureStatus === 'RUNNING') {
-          this.saved.set({ ...before, captureStatus: fresh.captureStatus, captureRequestedAt: fresh.captureRequestedAt });
-          this.pollWhileCapturing(fresh);
-          return;
+        const moved =
+          fresh.captureStatus !== before.captureStatus ||
+          fresh.autoRunStatus !== before.autoRunStatus ||
+          fresh.autoRunMessage !== before.autoRunMessage ||
+          fresh.workflowStatus !== before.workflowStatus ||
+          fresh.iterationCount !== before.iterationCount ||
+          fresh.resultStatus !== before.resultStatus;
+        if (moved) {
+          this.merge(before, fresh);
+          this.loadDiagnostics(fresh.groupId);
+          this.api.journey(fresh.trackerId).subscribe((j) => this.journey.set(j));
+          this.api.trackerHistory(fresh.trackerId).subscribe((h) => this.history.set(h));
+          this.api.iterations(fresh.trackerId).subscribe((i) => this.iterations.set(i));
+          this.api.trackerNotifications(fresh.trackerId).subscribe((n) => this.notifications.set(n));
+          if (fresh.captureStatus === 'DONE' && before.captureStatus !== 'DONE') {
+            this.snack
+              .open('Diagnostics captured: explain plan, profile and DDL are in', 'Show', { duration: 5000 })
+              .onAction()
+              .subscribe(() => this.tab.set(TAB.diagnostics));
+          }
+          if ((fresh.autoRunStatus === 'DONE' || fresh.autoRunStatus === 'FAILED') && before.autoRunStatus !== fresh.autoRunStatus) {
+            this.snack.open('Automatic round finished: ' + (fresh.autoRunMessage ?? ''), 'OK', { duration: 8000 });
+          }
+        } else {
+          this.saved.set({ ...before, captureRequestedAt: fresh.captureRequestedAt });
         }
-        this.merge(before, fresh);
-        this.loadDiagnostics(fresh.groupId);
-        this.api.journey(fresh.trackerId).subscribe((j) => this.journey.set(j));
-        this.api.trackerHistory(fresh.trackerId).subscribe((h) => this.history.set(h));
-        if (fresh.captureStatus === 'DONE') {
-          this.snack.open('Diagnostics captured: explain plan, profile and DDL are in', 'Show', { duration: 5000 })
-            .onAction()
-            .subscribe(() => this.tab.set(TAB.diagnostics));
-        }
+        this.pollWhileCapturing(fresh);
       });
     }, CAPTURE_POLL_MS);
   }
@@ -419,6 +455,36 @@ export class TrackerDetail implements OnInit {
 
   set(m: Tracker, field: keyof Tracker, v: string | null): void {
     (m as unknown as Record<string, unknown>)[field] = v;
+  }
+
+  // ------------------------------------------------------------------ evaluate error (steps 13-15)
+
+  /** Tuning exception (nothing more can be done) or awaiting an architectural fix of a theme. */
+  evaluate(kind: 'exception' | 'fix'): void {
+    const t = this.saved();
+    if (!t) return;
+    const data: EvaluateData = { kind, theme: t.theme, rootCause: t.rootCause };
+    this.dialog
+      .open(EvaluateDialog, { data, width: '560px', maxWidth: '95vw' })
+      .afterClosed()
+      .subscribe((r: EvaluateResult | undefined) => {
+        if (!r) return;
+        const call =
+          kind === 'exception' ? this.api.markException(t.trackerId, r.reason) : this.api.markAwaitingFix(t.trackerId, r.theme, r.rootCause);
+        call.subscribe(() => {
+          this.snack.open(kind === 'exception' ? 'Marked as tuning exception' : 'Waiting for the theme fix', undefined, { duration: 3000 });
+          this.load();
+        });
+      });
+  }
+
+  reopen(): void {
+    const t = this.saved();
+    if (!t) return;
+    this.api.reopen(t.trackerId).subscribe(() => {
+      this.snack.open('Back to tuning', undefined, { duration: 2500 });
+      this.load();
+    });
   }
 
   // ------------------------------------------------------------------ AI agent and test runs

@@ -16,7 +16,8 @@ public record SptProperties(
         @DefaultValue Cors cors,
         @DefaultValue Ui ui,
         @DefaultValue Diagnostics diagnostics,
-        @DefaultValue Agent agent) {
+        @DefaultValue Agent agent,
+        @DefaultValue Email email) {
 
     public enum SecurityMode { NONE, JWT }
 
@@ -103,6 +104,26 @@ public record SptProperties(
     }
 
     public enum AgentMode { HTTP, MANUAL }
+
+    /**
+     * How notification e-mails leave the application. Whether they are sent at all, and to whom, is set by
+     * administrators (Administration → Workflow settings); every e-mail is written to the outbox either way.
+     *
+     * @param transport     LOG: written to the outbox and the log only (nothing is sent);
+     *                      SMTP: through spring.mail.* (host, port, username, password);
+     *                      HTTP: POSTed as JSON to {@code endpointUrl}
+     * @param from          sender address
+     * @param endpointUrl   HTTP transport: the mail endpoint
+     * @param authorization HTTP transport: Authorization header value; empty = none
+     */
+    public record Email(
+            @DefaultValue("LOG") EmailTransportKind transport,
+            @DefaultValue("sql-tuning@localhost") String from,
+            @DefaultValue("") String endpointUrl,
+            @DefaultValue("") String authorization) {
+    }
+
+    public enum EmailTransportKind { LOG, SMTP, HTTP }
 
     public record Cors(@DefaultValue("http://localhost:4200") List<String> allowedOrigins) {
     }

@@ -17,6 +17,7 @@ import com.techcoder.sqlperf.common.RowGrouping;
 import com.techcoder.sqlperf.common.Specs;
 import com.techcoder.sqlperf.common.Texts;
 import com.techcoder.sqlperf.group.QueryGroup;
+import com.techcoder.sqlperf.settings.WorkflowSettings;
 import com.techcoder.sqlperf.users.UserDirectoryEntry;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -47,9 +48,11 @@ public class QueryLogController {
     private final LogSightingRepository sightings;
     private final IngestionBatchRepository batches;
     private final EntityManager em;
+    private final WorkflowSettings settings;
 
     public QueryLogController(QueryLogRepository repo, LogSightingRepository sightings, IngestionBatchRepository batches,
-                              EntityManager em) {
+                              EntityManager em, WorkflowSettings settings) {
+        this.settings = settings;
         this.repo = repo;
         this.sightings = sightings;
         this.batches = batches;
@@ -82,13 +85,15 @@ public class QueryLogController {
      * @param user      exact user (links from the dashboards); {@code userId} is a "contains" search
      * @param userGroup user group from Administration → Users &amp; groups; "Unassigned" = users without one
      * @param pattern   RECURRING: the row's pattern was first seen before the {@code from} day; NEW: everything else
+     * @param includeNormal also rows that are not bad queries (run time up to the threshold, or unknown); default:
+     *                      bad queries only
      */
     public record LogFilter(String q, String userId, String user, String userGroup, String errorCategory,
                             String errorCode, Long groupId, Long batchId, Double minDuration, Boolean errorsOnly,
                             Boolean reloadedOnly,
                             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
                             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
-                            String pattern) {
+                            String pattern, Boolean includeNormal) {
     }
 
     /** Columns the grid can group by. */
@@ -109,7 +114,7 @@ public class QueryLogController {
             @RequestParam(required = false) List<String> gk,
             LogFilter f) {
         var pageable = Paging.of(page, size, sort, SORTABLE, Sort.by(Sort.Direction.DESC, "startTime").and(Sort.by("id")));
-        return PageResponse.of(repo.findAll(spec(f, gk), pageable), l -> l);
+        return PageResponse.of(repo.findAll(spec(f, gk, settings.badMinMinutes()), pageable), l -> l);
     }
 
     /** Row grouping: distinct values of {@code by} with their row counts under the same filters. */
@@ -123,11 +128,15 @@ public class QueryLogController {
             LogFilter f) {
         boolean byValue = sort != null && sort.startsWith(by + ",");
         boolean desc = sort == null || !byValue || sort.endsWith(",desc");
-        return RowGrouping.buckets(em, QueryLog.class, spec(f, gk), GROUPABLE, by, byValue, desc, page, size);
+        return RowGrouping.buckets(em, QueryLog.class, spec(f, gk, settings.badMinMinutes()), GROUPABLE, by, byValue, desc,
+                page, size);
     }
 
-    static Specification<QueryLog> spec(LogFilter f, List<String> gk) {
+    /** @param badMinMinutes the bad-query threshold: rows longer than it are bad queries */
+    static Specification<QueryLog> spec(LogFilter f, List<String> gk, double badMinMinutes) {
         return Specs.<QueryLog>all(
+                Boolean.TRUE.equals(f.includeNormal()) ? null
+                        : (root, cq, cb) -> cb.greaterThan(root.<Double>get("durationMinutes"), badMinMinutes),
                 Specs.like("executedQuery", f.q()),
                 Specs.like("userId", f.userId()),
                 Specs.eq("userId", Texts.trimToNull(f.user())),

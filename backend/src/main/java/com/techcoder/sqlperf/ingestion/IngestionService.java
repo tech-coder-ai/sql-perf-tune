@@ -346,7 +346,22 @@ public class IngestionService {
         b.setStatus(b.getRowsRejected() > 0 ? Status.COMPLETED_WITH_ERRORS : Status.COMPLETED);
         b.setMessage(Texts.truncate(join(loader.errors, summary(b)), 4000));
         b.setCompletedAt(LocalDateTime.now());
-        return tx.execute(s -> batches.save(b));
+        IngestionBatch saved = tx.execute(s -> batches.save(b));
+        if (events != null && groupsAffected > 0) {
+            events.publishEvent(new ImportFinished(saved.getId(), groupsAffected));
+        }
+        return saved;
+    }
+
+    /** Published after an import has stored and grouped its rows (starts the automatic first tuning run). */
+    public record ImportFinished(Long batchId, int groupsAffected) {
+    }
+
+    private org.springframework.context.ApplicationEventPublisher events;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setEvents(org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
     }
 
     private IngestionBatch fail(Loader loader, Exception e) {

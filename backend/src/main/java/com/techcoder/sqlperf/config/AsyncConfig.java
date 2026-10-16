@@ -47,4 +47,17 @@ public class AsyncConfig {
         ex.initialize();
         return ex;
     }
+
+    /** E-mail delivery (one at a time; a slow mail server never holds a request). */
+    @Bean(name = "notificationExecutor", destroyMethod = "shutdown")
+    Executor notificationExecutor() {
+        ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+        ex.setCorePoolSize(1);
+        ex.setMaxPoolSize(1);
+        ex.setQueueCapacity(10_000);
+        ex.setThreadNamePrefix("spt-mail-");
+        ex.setWaitForTasksToCompleteOnShutdown(true);
+        ex.initialize();
+        return ex;
+    }
 }

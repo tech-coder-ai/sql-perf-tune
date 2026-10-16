@@ -97,9 +97,9 @@ docs/                             architecture, developer guide, user manual
 - Custom HQL functions (`SptFunctionContributor`, dialect-aware): `spt_lower(...)` for case-insensitive search
   on Oracle CLOBs and SQLite, and `spt_date(ts)` for grouping by calendar day (§9).
 - `db/oracle/01_drop_and_create_schema.sql` drops and re-creates every table and view and loads the initial
-  values (prompt template, dropdown values), equivalent to V1-V6 in one script for DBAs. It also drops the
+  values (prompt template, dropdown values), equivalent to V1-V7 in one script for DBAs. It also drops the
   Flyway history; start the service once with `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true` and
-  `SPRING_FLYWAY_BASELINE_VERSION=6` afterwards. Keep it in step when adding a migration.
+  `SPRING_FLYWAY_BASELINE_VERSION=7` afterwards. Keep it in step when adding a migration.
 - Oracle scripts were written for 19c+ (identity columns). Run them against your target version in CI
   before the first shared deployment.
 
@@ -108,11 +108,13 @@ docs/                             architecture, developer guide, user manual
 `SPT_INGESTION_BATCH`, `SPT_SOURCE_FILE`, `SPT_QUERY_LOG`, `SPT_QUERY_LOG_SIGHTING`, `SPT_QUERY_GROUP`,
 `SPT_TUNING_TRACKER` (+ view `SPT_TRACKER_V`), `SPT_SQL_DIAGNOSTIC`, `SPT_TABLE_DDL`,
 `SPT_PROMPT_TEMPLATE`, `SPT_OPTIMIZATION_RUN`, `SPT_TUNING_ITERATION`, `SPT_FEEDBACK`,
-`SPT_CUSTOM_FIELD(_VALUE)`, `SPT_AUDIT_EVENT`, `SPT_DATA_SOURCE`, `SPT_LOOKUP`, `SPT_USER_DIRECTORY`.
+`SPT_CUSTOM_FIELD(_VALUE)`, `SPT_AUDIT_EVENT`, `SPT_DATA_SOURCE`, `SPT_LOOKUP`, `SPT_USER_DIRECTORY`,
+`SPT_SETTING`, `SPT_NOTIFICATION`, `SPT_THEME_FIX`.
 
 Migrations: V1 core schema, V2 prompt seed, V3 load de-duplication, V4 analytics and iterations (lookups,
 iterations, stage timestamps, CPU / scan metrics, user directory, request source), V5 pooled ids (Oracle
-sequences, see §5), V6 diagnostics capture status on the tracker (§8). See [architecture.md](architecture.md) for the ER diagram.
+sequences, see §5), V6 diagnostics capture status on the tracker (§8), V7 tuning workflow (settings, e-mail outbox,
+theme fixes; tracker diagnostic id, result / automatic-round status, root cause, exception; §8a). See [architecture.md](architecture.md) for the ER diagram.
 
 ### Oracle in Docker (local)
 
@@ -340,6 +342,93 @@ agent answer / manual ──► PROPOSED ──test──► TESTED (or FAILED) 
 
 `TuningLifecycleTest` walks an item through the whole lifecycle and checks every insight.
 
+## 8a. Automatic tuning workflow
+
+### Settings (`settings/`)
+
+Admin-editable values live in `SPT_SETTING` (key → value, with who / when) behind `WorkflowSettings`, which
+defines every key (`DEFINITIONS`: group, label, help, kind, default) and typed getters. `GET /api/settings`
+lists definitions with the current value; `PUT /api/settings` takes `{key: value}`, validates, audits, and an
+empty value deletes the row (back to the default). Reads are cached for 5 s. A default can be overridden per
+environment with `spt.settings.<key>` (tests set `spt.settings.auto.enabled=false` and
+`spt.settings.bad.min-minutes=0`).
+
+| Key | Default | |
+|---|---|---|
+| `bad.min-minutes` | `5` | a query longer than this is bad; lists, dashboards and insights count bad queries only |
+| `candidate.min-runs` | `2` | bad runs for a pattern to be a tuning candidate |
+| `adhoc.close-days` | `45` | a single-bad-run pattern not seen for this long is *Adhoc closed* |
+| `auto.enabled` | `true` | automatic round on / off |
+| `auto.max-per-run` | `25` | candidates tracked per round |
+| `adoption.threshold-pct` | `15` | gain above which the result goes to the users |
+| `email.enabled` | `false` | send e-mails (the outbox row is written either way) |
+| `email.adoption-recipients` / `email.tuning-recipients` | empty | comma / semicolon separated |
+| `follow-up.weeks` | `3` | ready-for-adoption items older than this are in *Follow up* |
+| `app.base-url` | `http://localhost:4200` | links in e-mails |
+
+**Bad vs normal** is computed when read (`durationMinutes > bad.min-minutes`), so changing the threshold
+re-classifies everything at once: `QueryLogController.spec`, `QueryGroupController` (`badRuns` subquery,
+`PatternClassifier`: `BAD` / `ADHOC` / `ADHOC_CLOSED` / `NORMAL`), `ActiveWindow` and `InsightsService.bad()`
+(every query except the savings' runs-per-day baseline). `includeNormal=true` on the list endpoints shows all.
+
+### The automatic round (`autorun/`)
+
+Each step publishes a Spring event; `AutoRunService` reacts and moves the item on. Items it handles carry
+`AUTO_RUN_STATUS` (`PENDING` → `RUNNING` → `DONE` / `FAILED`) and `AUTO_RUN_MESSAGE`, written with bulk
+JPQL updates (no version bump, like the capture status). Manual work never waits on it.
+
+```
+ImportFinished (IngestionService.finish) ─┐
+@Scheduled spt.auto.cron ─────────────────┼─► trackCandidates: BAD patterns not tracked, by total time, ≤ max-per-run
+POST /api/auto-run ───────────────────────┘        └─ TrackerService.create → automatic capture (§8)
+CaptureFinished (DiagnosticsCaptureService) ──► askAgent → WorkflowService.startOptimization
+AgentAnswered (WorkflowService.callAgent) ───► IterationTestService.test → ComparisonModule.evaluate → route
+     READY_FOR_ADOPTION (gain > threshold, results match) → IterationService.select → IterationSelected
+                                                            → after commit: NotificationService.readyForAdoption
+     NEEDS_SME_REVIEW / FAILED / any step failed           → NotificationService.needsReview (tuning team)
+```
+
+- `ComparisonModule.evaluate` takes the best tested iteration (`IterationService.best`), computes the run-time
+  gain vs the original and stores `RESULT_STATUS`; it also runs after every manual test (`IterationTested`)
+  but only the automatic round routes.
+- The round runs as user `automatic run` (`CurrentUser.runAs`), so history shows who did what.
+- **Theme fixes:** `POST /api/auto-run/theme-fixes {theme, notes}` stores an `SPT_THEME_FIX` row, reopens every
+  `AWAITING_FIX` item of the theme with `AUTO_RUN_STATUS = PENDING` and re-captures (or asks the agent).
+- Tracker endpoints `POST /api/tracker/{id}/exception`, `/awaiting-fix` (theme from the THEME lookup +
+  root cause) and `/reopen`; stages `TUNING_EXCEPTION` and `AWAITING_FIX`. `startOptimization` refuses
+  exceptions.
+- `DIAGNOSTIC_ID` = `DX-` + 6-digit tracker id, set on create (excluded from optimistic locking).
+
+**Real Impala / LLM:** nothing in `autorun/` depends on the mocks. Swap `QueryMetadataClient` (§8) and the LLM
+endpoint (configuration) and the round uses them. With the real engine make `IterationTestService.test`
+asynchronous and publish `IterationTested` when done; route from that event instead of from `onAnswer`.
+
+### E-mail (`notification/`)
+
+`NotificationService` builds the HTML (diagnostic id, pattern, engine, runs / users, before → after metrics
+with gain, results match, iteration and theme, how it was tuned, tuned and original SQL, link) and writes an
+`SPT_NOTIFICATION` row in the caller's transaction: `DISABLED` (sending off), `NO_RECIPIENTS` or `PENDING`.
+After commit, `PENDING` rows are delivered on `notificationExecutor` through the `EmailTransport` port and end
+`SENT`, `LOGGED` or `FAILED` (with the error). Endpoints: `GET /api/notifications`, `/{id}` (with body),
+`/tracker/{id}`.
+
+| `spt.email.transport` | Implementation | Configure |
+|---|---|---|
+| `LOG` (default) | `LogEmailTransport`: logs it, status `LOGGED`; **nothing is sent** | – |
+| `SMTP` | `SmtpEmailTransport` (`JavaMailSender`) | `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `spring.mail.properties.mail.smtp.starttls.enable` |
+| `HTTP` | `HttpEmailTransport`: `POST {"from","to":[..],"subject","html"}`, 2xx = sent | `SPT_EMAIL_ENDPOINT_URL`, `SPT_EMAIL_AUTHORIZATION` |
+
+The sender is `SPT_EMAIL_FROM`. Another channel (Teams, a queue) is one more `EmailTransport` bean.
+
+### Work queues (`queues/`)
+
+`GET /api/queues` returns the lists the Work queues screen shows per persona: `readyForAdoption` (largest
+saving per month first), `followUp` (with the users longer than `follow-up.weeks`), `reappeared` (adopted, but
+bad runs of the group after `ADOPTED_AT`), `needsReview`, `failed`, `rejected`, `exceptions`, `awaitingFix`.
+The persona is a UI preference (`core/persona.ts`), not a permission. Business-user buttons post feedback
+(`COMMENT` attest, `ADOPTED`, `REJECTED` with reason) to `POST /api/groups/{id}/feedback`.
+`GET /api/insights/workflow?date=` feeds Q16 (one-and-done patterns per day) and Q17 (reappeared).
+
 ---
 
 ## 9. Insights (`insights/`)
@@ -490,6 +579,12 @@ All grid setup lives in `src/app/shared/grid.ts`:
 | `spt.agent.timeout-seconds` | `180` | |
 | `spt.agent.mock-endpoint` | `true` (`false` in prod) | serve `/api/mock-llm/v1/optimize` |
 | `spt.agent.mock-delay-millis` | `5000` | |
+| `spt.auto.cron` | `0 15 6 * * *` (`SPT_AUTO_CRON`) | daily automatic round (also after each import) |
+| `spt.email.transport` | `LOG` (`SPT_EMAIL_TRANSPORT`) | `LOG` / `SMTP` / `HTTP` (§8a) |
+| `spt.email.from` | `sql-tuning@localhost` (`SPT_EMAIL_FROM`) | |
+| `spt.email.endpoint-url` | empty (`SPT_EMAIL_ENDPOINT_URL`) | HTTP transport |
+| `spt.email.authorization` | empty (`SPT_EMAIL_AUTHORIZATION`) | HTTP transport `Authorization` header |
+| `spt.settings.<key>` | | overrides the default of an admin setting (§8a) |
 
 Oracle profile variables: `SPT_DB_URL`, `SPT_DB_USER`, `SPT_DB_PASSWORD`, `SPT_DB_SCHEMA`, `SPT_DB_POOL_SIZE`.
 Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
@@ -499,7 +594,7 @@ Prod profile: `SPT_JWT_ISSUER_URI`, `SPT_CORS_ORIGINS`, `SPT_API_DOCS_ENABLED`.
 ## 13. Testing & quality gates
 
 ```bash
-cd backend && mvn test                     # 27 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, mock LLM, drill-down on SQLite
+cd backend && mvn test                     # 30 tests incl. ingestion / de-duplication, tuning lifecycle, auto capture, mock LLM, automatic round, queues, drill-down on SQLite
 # the same import round-trip test against a real Oracle (container above):
 SPT_TEST_ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1 SPT_TEST_ORACLE_USER=SPT_APP \
   SPT_TEST_ORACLE_PASSWORD=<app-pwd> mvn test -Dtest=ImportRoundTripOracleIT
@@ -514,7 +609,9 @@ endpoint, and recovery of rows left ungrouped by an interrupted import (it runs 
 `spt.diagnostics.auto-capture=false` so the background capture does not race its manual captures).
 `DiagnosticsCaptureTest` covers the automatic capture; `MockLlmFlowTest` three agent answers over real HTTP from
 the mock endpoint → test runs → best;
-`LogDrillDownTest` the dashboard links and row grouping. `TuningLifecycleTest` uses `spt.agent.mode=MANUAL`.
+`LogDrillDownTest` the dashboard links and row grouping. `AutoRunFlowTest` runs the automatic round over real HTTP
+(both routes, e-mails `LOGGED`), `WorkflowQueuesTest` exception / awaiting fix / theme-fix retry / queues, and
+`BadQueryThresholdTest` the bad-query filter on logs, groups and insights. `TuningLifecycleTest` uses `spt.agent.mode=MANUAL`.
 
 ---
 

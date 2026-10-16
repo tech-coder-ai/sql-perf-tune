@@ -228,7 +228,8 @@ class TuningLifecycleTest {
                 d.postRunCpuSeconds(), d.ogRowsScanned(), d.postRunRowsScanned(), d.ogTablesScanned(),
                 d.postRunTablesScanned(), d.ogBytesScanned(), d.postRunBytesScanned(), d.ogPeakMemoryMb(),
                 d.postRunPeakMemoryMb(), theme, d.smeValidation(), d.installStatus(), d.executeStatus(),
-                d.validationStatus(), d.changes(), d.problem(), d.recommendations(), null);
+                d.validationStatus(), d.changes(), d.problem(), d.recommendations(), d.rootCause(),
+                d.promptImprovement(), null);
     }
 
     private static IterationService.TestResult result(double minutes, double cpu, int tables, long rows) {

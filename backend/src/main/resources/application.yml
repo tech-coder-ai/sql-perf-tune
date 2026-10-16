@@ -81,6 +81,18 @@ spt:
     timeout-seconds: 180
     mock-endpoint: true
     mock-delay-millis: 5000
+  auto:
+    # daily automatic round (track candidates -> capture -> agent -> test -> route); on/off is the admin setting
+    cron: ${SPT_AUTO_CRON:0 15 6 * * *}
+  email:
+    # LOG = write the e-mail to the outbox and the log only (nothing is sent);
+    # SMTP = send with spring.mail.* (SPRING_MAIL_HOST, _PORT, _USERNAME, _PASSWORD);
+    # HTTP = POST {"from","to","subject","html"} to endpoint-url
+    transport: ${SPT_EMAIL_TRANSPORT:LOG}
+    from: ${SPT_EMAIL_FROM:sql-tuning@localhost}
+    endpoint-url: ${SPT_EMAIL_ENDPOINT_URL:}
+    # Authorization header for the HTTP mail endpoint; never commit it
+    authorization: ${SPT_EMAIL_AUTHORIZATION:}
   cors:
     allowed-origins: http://localhost:4200
   ui:

@@ -27,6 +27,13 @@ public class InsightsController {
     }
 
     /** Q4 (prior day), Q6, Q9, Q15. */
+    /** Q16 one-and-done (adhoc-only) patterns per day; Q17 adopted SQL that came back. */
+    @GetMapping("/workflow")
+    public InsightsService.WorkflowInsight workflow(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return service.workflow(date == null ? LocalDate.now() : date);
+    }
+
     @GetMapping("/pipeline")
     public InsightsService.Pipeline pipeline(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate priorDay,

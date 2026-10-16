@@ -29,10 +29,12 @@ public class IterationTestService {
     private final WorkflowService workflow;
     private final QueryMetadataClient client;
     private final TransactionTemplate tx;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     public IterationTestService(TuningTrackerRepository trackers, QueryGroupRepository groups,
                                 IterationService iterations, WorkflowService workflow, QueryMetadataClient client,
-                                TransactionTemplate tx) {
+                                TransactionTemplate tx, org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
         this.trackers = trackers;
         this.groups = groups;
         this.iterations = iterations;
@@ -64,7 +66,7 @@ public class IterationTestService {
         });
         // the run itself holds no transaction (it can take as long as the query)
         QueryMetadataClient.Result r = client.fetch(req);
-        return tx.execute(s -> CurrentUser.runAs(requester, () -> {
+        SqlDiagnostic stored = tx.execute(s -> CurrentUser.runAs(requester, () -> {
             SqlDiagnostic d = workflow.captureDiagnostic(req.groupId(), new WorkflowService.DiagnosticRequest(
                     SqlDiagnostic.Phase.OPTIMIZED, null, iterationId, r.queryId(), req.sql(), r.rowCount(), null,
                     r.explainPlan(), r.profileRaw(), null, SqlDiagnostic.Status.CAPTURED, null, null, null, null, null,
@@ -72,5 +74,11 @@ public class IterationTestService {
             d.setCapturedBy(client.source());
             return d;
         }));
+        events.publishEvent(new IterationTested(trackerId, iterationId));
+        return stored;
+    }
+
+    /** Published (outside any transaction) after a test run was recorded. */
+    public record IterationTested(Long trackerId, Long iterationId) {
     }
 }

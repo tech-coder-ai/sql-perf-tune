@@ -26,6 +26,8 @@ import {
 import { TimestampPipe } from '../../shared/format';
 import { LinkCell, StatusCell, baseGridOptions, errorCellRules, numCol, tsFormatter } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
+import { NotificationsPanel } from './notifications-panel';
+import { WorkflowSettingsPanel } from './workflow-settings-panel';
 
 const SAMPLE_LOG_QUERY = `SELECT seq_id, executed_query, user_query, error_code, error_category, error_message,
        user_id, start_time, end_time, duration_minutes
@@ -35,6 +37,8 @@ const SAMPLE_LOG_QUERY = `SELECT seq_id, executed_query, user_query, error_code,
 @Component({
   selector: 'app-admin',
   imports: [
+    WorkflowSettingsPanel,
+    NotificationsPanel,
     FormsModule,
     MatTabsModule,
     AgGridAngular,

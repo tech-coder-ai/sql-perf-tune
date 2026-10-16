@@ -2,7 +2,10 @@
   <div class="page-header">
     <div>
       <h1>Query Logs</h1>
-      <div class="subtitle">Every executed statement from imported files and database pulls · {{ total() }} rows</div>
+      <div class="subtitle">
+        {{ filter.includeNormal ? 'All executed statements' : 'Bad queries (longer than ' + settings.badMinMinutes() + ' min)' }}
+        from imported files and database pulls · {{ total() }} rows
+      </div>
     </div>
     <span class="spacer"></span>
     <button mat-flat-button (click)="importLogs()"><mat-icon>upload</mat-icon> Import logs</button>
@@ -24,11 +27,11 @@
         <input matInput name="errorCategory" [(ngModel)]="filter.errorCategory" />
       </mat-form-field>
       <mat-form-field>
-        <mat-label>Start from</mat-label>
+        <mat-label>Ran from</mat-label>
         <input matInput type="datetime-local" name="from" [(ngModel)]="filter.from" />
       </mat-form-field>
       <mat-form-field>
-        <mat-label>Start to</mat-label>
+        <mat-label>Ran to</mat-label>
         <input matInput type="datetime-local" name="to" [(ngModel)]="filter.to" />
       </mat-form-field>
       <mat-form-field>
@@ -36,6 +39,13 @@
         <input matInput type="number" min="0" name="minDuration" [(ngModel)]="filter.minDuration" />
       </mat-form-field>
       <mat-checkbox name="errorsOnly" [(ngModel)]="filter.errorsOnly">Errors only</mat-checkbox>
+      <mat-checkbox
+        name="includeNormal"
+        [(ngModel)]="filter.includeNormal"
+        (change)="search()"
+        [matTooltip]="'By default only bad queries (longer than ' + settings.badMinMinutes() + ' min) are shown'"
+        >Include normal queries</mat-checkbox
+      >
       <mat-checkbox name="reloadedOnly" [(ngModel)]="filter.reloadedOnly" matTooltip="Rows that appeared in more than one load">Re-loaded only</mat-checkbox>
       <button mat-stroked-button type="submit"><mat-icon>filter_alt</mat-icon> Apply</button>
       <button mat-button type="button" (click)="reset()">Reset</button>

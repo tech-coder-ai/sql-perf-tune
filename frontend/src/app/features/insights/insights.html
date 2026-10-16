@@ -8,12 +8,13 @@
 
   <div class="controls panel">
     <div class="ctl">
-      <span class="ctl-label">Day <span class="muted">(Q1–Q4, Q8)</span></span>
+      <span class="ctl-label">Day <span class="muted">(Q1–Q4, Q8, Q16, Q17)</span></span>
       <input type="date" [value]="day()" (change)="setDay($any($event.target).value)" aria-label="Day" />
     </div>
     <div class="ctl">
       <span class="ctl-label">Period <span class="muted">(Q5, Q7, Q9, Q11, Q13, Q15)</span></span>
       <mat-button-toggle-group [value]="preset" (change)="setPreset($event.value)" hideSingleSelectionIndicator aria-label="Period">
+        <mat-button-toggle value="yesterday">Yesterday</mat-button-toggle>
         <mat-button-toggle value="7d">7 days</mat-button-toggle>
         <mat-button-toggle value="30d">30 days</mat-button-toggle>
         <mat-button-toggle value="mtd">Month to date</mat-button-toggle>
@@ -369,6 +370,47 @@
             note="Register proactive and user requests with “New tuning request” in the top bar."
           >
             <app-line-chart [series]="q14Series()" [labels]="q10Labels()" ariaLabel="Tuning items created per month by source" />
+          </app-chart-card>
+        </div>
+      }
+      <!-- ============================================================ WORKFLOW -->
+      <h2 class="group-title">Workflow <span class="muted">· {{ day() }}</span></h2>
+      @if (workflow(); as w) {
+        <div class="grid-2">
+          <app-chart-card
+            anchor="q16"
+            q="Q16"
+            title="How many bad SQL are one and done ('adhoc only')?"
+            [answer]="num(w.oneAndDoneOnDay) + ' of the ' + num(w.badPatternsOnDay) + ' bad patterns of ' + w.date + ' ran on that day only: no sense tuning them unless they come back.'"
+            [table]="{ headers: ['Day', 'One-and-done patterns'], rows: w.oneAndDoneByDay.map(x => [x.label, x.count]) }"
+            note="One and done = every bad run of the pattern was on one day. Such patterns are not auto-tracked; they are 'Adhoc only' on Query groups."
+          >
+            <app-column-chart [data]="q16Days()" [highlight]="13" [slot]="2" unit="one-and-done patterns" ariaLabel="One-and-done patterns per day" />
+          </app-chart-card>
+
+          <app-chart-card
+            anchor="q17"
+            q="Q17"
+            title="Which adopted SQL came back as bad SQL?"
+            [answer]="w.reappeared.length ? w.reappeared.length + ' adopted SQL ran again as bad SQL after the users adopted the tuned version. The Client Development Team should follow up.' : 'No adopted SQL came back.'"
+            [table]="{ headers: ['Item', 'Adopted', 'Bad runs since', 'Users since', 'Last seen'], rows: w.reappeared.map(r => ['T-' + r.trackerId, r.adoptedAt.substring(0, 10), r.runsSince, r.usersSince, r.lastSeen.substring(0, 16)]) }"
+            note="Usually a second user or a functional ID still submits the old SQL."
+          >
+            <table class="simple">
+              <tr><th>Item</th><th class="num">Bad runs since</th><th class="num">Users</th><th>Last seen</th></tr>
+              @for (r of w.reappeared.slice(0, 8); track r.trackerId) {
+                <tr class="clickable" [routerLink]="['/tracker', r.trackerId]">
+                  <td class="item-cell"><span class="mono">T-{{ r.trackerId }}</span> <span class="sql">{{ r.sqlSnippet }}</span></td>
+                  <td class="num">
+                    <a class="link" [routerLink]="['/logs']" [queryParams]="logs({ groupId: r.groupId, from: r.adoptedAt.substring(0, 10) })" (click)="$event.stopPropagation()">{{ num(r.runsSince) }}</a>
+                  </td>
+                  <td class="num">{{ r.usersSince }}</td>
+                  <td class="nowrap">{{ r.lastSeen.replace('T', ' ').substring(0, 16) }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="muted">Nothing came back.</td></tr>
+              }
+            </table>
           </app-chart-card>
         </div>
       }

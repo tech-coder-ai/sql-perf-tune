@@ -14,6 +14,11 @@ export const routes: Routes = [
     loadComponent: () => import('./features/insights/insights').then((m) => m.Insights),
   },
   {
+    path: 'queues',
+    title: 'Work queues · SQL Tuning',
+    loadComponent: () => import('./features/queues/queues').then((m) => m.Queues),
+  },
+  {
     path: 'pipeline',
     title: 'Pipeline board · SQL Tuning',
     loadComponent: () => import('./features/pipeline/pipeline').then((m) => m.Pipeline),

@@ -32,7 +32,7 @@ import {
 } from '../../shared/grid';
 import { GROUPABLE, TRACKER_COLUMNS, TrackerColumn, cellValue } from './tracker-columns';
 
-const STATE_KEY = 'tracker.grid.v4';
+const STATE_KEY = 'tracker.grid.v5';
 
 @Component({
   selector: 'app-tracker',

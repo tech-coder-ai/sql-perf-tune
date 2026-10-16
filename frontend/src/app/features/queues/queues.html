@@ -1,0 +1,96 @@
+<div class="page">
+  <div class="page-header">
+    <div>
+      <h1>Work queues</h1>
+      <div class="subtitle">What each team has to act on in the tuning workflow · working as <b>{{ personaStore.label() }}</b></div>
+    </div>
+    <span class="spacer"></span>
+    <button mat-stroked-button (click)="load()"><mat-icon>refresh</mat-icon> Refresh</button>
+  </div>
+
+  <app-loading [loading]="loading()" [empty]="!data()" label="Loading the work queues…">
+    @if (data(); as d) {
+      <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs" [selectedIndex]="tabIndex()" (selectedIndexChange)="selectPersona($event)">
+        @for (p of personas; track p.key) {
+          <mat-tab>
+            <ng-template mat-tab-label>
+              <mat-icon class="tab-icon">{{ p.icon }}</mat-icon> {{ p.label }} <span class="count">{{ count(p.key) }}</span>
+            </ng-template>
+            <div class="tab-body">
+              <p class="muted persona-hint">{{ p.hint }}</p>
+              @for (q of queuesOf(p.key); track q.key) {
+                <section class="queue card">
+                  <div class="queue-head">
+                    <h2>{{ q.title }} <span class="count">{{ items(q.key).length }}</span></h2>
+                    <span class="muted">{{ q.key === 'followUp' ? 'Waiting for the users for more than ' + d.followUpWeeks + ' weeks. ' : '' }}{{ q.hint }}</span>
+                  </div>
+                  @if (q.key === 'awaitingFix') {
+                    @for (g of byTheme(); track g.theme) {
+                      <div class="theme-row">
+                        <b>{{ g.theme }}</b> <span class="muted">{{ g.items.length }} SQL waiting</span>
+                        <span class="spacer"></span>
+                        <input class="notes" [(ngModel)]="fixNotes[g.theme]" placeholder="What was fixed (optional)" [attr.aria-label]="'Fix notes for ' + g.theme" />
+                        <button mat-flat-button (click)="releaseFix(g.theme, g.items.length)" [disabled]="g.theme === 'No theme'">
+                          <mat-icon>rocket_launch</mat-icon> Fix released: retry {{ g.items.length }}
+                        </button>
+                      </div>
+                      <ng-container *ngTemplateOutlet="table; context: { $implicit: g.items, q: q, p: p.key }" />
+                    } @empty {
+                      <p class="muted">{{ q.empty }}</p>
+                    }
+                    @if (fixes().length) {
+                      <div class="fixes muted">
+                        Fixes released:
+                        @for (f of fixes().slice(0, 5); track f.id) {
+                          <span>{{ f.theme }} · {{ f.releasedAt | ts }} · {{ f.itemsRetried }} retried</span>
+                        }
+                      </div>
+                    }
+                  } @else {
+                    @if (items(q.key).length) {
+                      <ng-container *ngTemplateOutlet="table; context: { $implicit: items(q.key), q: q, p: p.key }" />
+                    } @else {
+                      <p class="muted">{{ q.empty }}</p>
+                    }
+                  }
+                </section>
+              }
+            </div>
+          </mat-tab>
+        }
+      </mat-tab-group>
+    }
+  </app-loading>
+</div>
+
+<ng-template #table let-rows let-q="q" let-p="p">
+  <table class="simple">
+    <tr>
+      <th>Item</th><th>SQL</th><th class="num">Faster</th><th class="num" title="Per-run saving × bad runs in the last 30 days">Saving / month</th>
+      <th class="num">Days</th><th>Details</th><th></th>
+    </tr>
+    @for (i of rows; track i.trackerId) {
+      <tr>
+        <td class="nowrap">
+          <a class="link" [routerLink]="['/tracker', i.trackerId]">T-{{ i.trackerId }}</a>
+          <div class="muted mono small">{{ i.diagnosticId }}</div>
+          <app-status [value]="i.stage" />
+        </td>
+        <td class="sql">{{ i.sqlSnippet }}</td>
+        <td class="num">{{ i.gainPct === null ? '—' : (i.gainPct | number: '1.0-1') + '%' }}</td>
+        <td class="num">{{ i.savingMinutesPerMonth === null ? '—' : minutesText(i.savingMinutesPerMonth) }}</td>
+        <td class="num">{{ i.daysWaiting ?? '—' }}</td>
+        <td class="detail">{{ i.detail }}@if (i.owner) {<div class="muted small">lead: {{ i.owner }}</div>}</td>
+        <td class="actions nowrap">
+          @if (p === 'user') {
+            <button mat-stroked-button (click)="attestWorks(i)" matTooltip="Record that you tested it and it works"><mat-icon>task_alt</mat-icon> Works</button>
+            <button mat-flat-button (click)="adopt(i)" matTooltip="You use the tuned SQL now"><mat-icon>verified</mat-icon> Adopted</button>
+            <button mat-button class="danger" (click)="reject(i)" matTooltip="It did not work: say why"><mat-icon>block</mat-icon> Didn't work</button>
+          } @else {
+            <a mat-button [routerLink]="['/tracker', i.trackerId]"><mat-icon>open_in_new</mat-icon> Open</a>
+          }
+        </td>
+      </tr>
+    }
+  </table>
+</ng-template>

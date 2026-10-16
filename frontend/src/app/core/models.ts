@@ -51,6 +51,8 @@ export interface SourceFile {
   lastLoadedAt: string;
 }
 
+export type PatternClass = 'BAD' | 'ADHOC' | 'ADHOC_CLOSED' | 'NORMAL';
+
 export interface QueryGroup {
   groupId: number;
   fingerprint: string;
@@ -74,6 +76,10 @@ export interface QueryGroup {
   trackerId: number | null;
   workflowStatus: WorkflowStatus | null;
   customFields: Record<string, string>;
+  /** runs longer than the bad-query threshold (Administration → Workflow settings) */
+  badRuns: number;
+  /** BAD: tuning candidate; ADHOC: one bad run so far; ADHOC_CLOSED: adhoc and not seen for the closing period */
+  patternClass: PatternClass;
 }
 
 export const WORKFLOW_STATUSES = [
@@ -86,11 +92,15 @@ export const WORKFLOW_STATUSES = [
   'ADOPTED',
   'REJECTED',
   'ON_HOLD',
+  'TUNING_EXCEPTION',
+  'AWAITING_FIX',
 ] as const;
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 export type Priority = (typeof PRIORITIES)[number];
+
+export type ResultStatus = 'READY_FOR_ADOPTION' | 'NEEDS_SME_REVIEW' | 'FAILED';
 
 export type CaptureStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED';
 
@@ -177,6 +187,19 @@ export interface Tracker {
   captureRequestedAt: string | null;
   captureFinishedAt: string | null;
   captureMessage: string | null;
+  /** correlation id with the diagnostics process and the Cloudera team, e.g. DX-000123 */
+  diagnosticId: string | null;
+  /** comparison module: where the tested result goes */
+  resultStatus: ResultStatus | null;
+  /** automatic first tuning round */
+  autoRunStatus: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | null;
+  autoRunMessage: string | null;
+  notifiedAt: string | null;
+  rootCause: string | null;
+  promptImprovement: string | null;
+  exceptionReason: string | null;
+  exceptionBy: string | null;
+  exceptionAt: string | null;
   version: number;
   customFields: Record<string, string>;
 }
@@ -652,4 +675,91 @@ export interface Bucket {
 export interface AgentInfo {
   modelName: string;
   automatic: boolean;
+}
+
+// ----- tuning workflow
+
+export interface SettingDefinition {
+  key: string;
+  group: string;
+  label: string;
+  help: string;
+  kind: 'NUMBER' | 'BOOLEAN' | 'TEXT' | 'EMAILS';
+  defaultValue: string;
+}
+
+export interface SettingValue {
+  definition: SettingDefinition;
+  value: string;
+  isDefault: boolean;
+}
+
+export interface NotificationRow {
+  id: number;
+  trackerId: number | null;
+  kind: 'READY_FOR_ADOPTION' | 'NEEDS_SME_REVIEW';
+  recipients: string | null;
+  subject: string;
+  status: 'PENDING' | 'SENT' | 'LOGGED' | 'FAILED' | 'DISABLED' | 'NO_RECIPIENTS';
+  errorMessage: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+export interface NotificationFull extends NotificationRow {
+  body: string;
+}
+
+export interface QueueItem {
+  trackerId: number;
+  diagnosticId: string | null;
+  groupId: number;
+  sqlSnippet: string | null;
+  stage: WorkflowStatus;
+  resultStatus: ResultStatus | null;
+  gainPct: number | null;
+  daysWaiting: number | null;
+  theme: string | null;
+  owner: string | null;
+  detail: string | null;
+  savingMinutesPerMonth: number | null;
+  since: string | null;
+}
+
+export interface WorkQueues {
+  followUpWeeks: number;
+  thresholdPct: number;
+  readyForAdoption: QueueItem[];
+  followUp: QueueItem[];
+  reappeared: QueueItem[];
+  needsReview: QueueItem[];
+  failed: QueueItem[];
+  rejected: QueueItem[];
+  exceptions: QueueItem[];
+  awaitingFix: QueueItem[];
+}
+
+export interface ThemeFix {
+  id: number;
+  theme: string;
+  notes: string | null;
+  itemsRetried: number;
+  releasedAt: string;
+  releasedBy: string | null;
+}
+
+export interface WorkflowInsight {
+  date: string;
+  oneAndDoneByDay: { label: string; count: number }[];
+  oneAndDoneOnDay: number;
+  badPatternsOnDay: number;
+  reappeared: {
+    trackerId: number;
+    groupId: number;
+    sqlSnippet: string | null;
+    adoptedAt: string;
+    runsSince: number;
+    usersSince: number;
+    lastSeen: string;
+  }[];
 }
