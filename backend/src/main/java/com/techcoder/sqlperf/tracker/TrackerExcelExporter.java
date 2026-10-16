@@ -29,7 +29,7 @@ public class TrackerExcelExporter {
 
     /** Internal fields; of the automatic capture only its status is exported. */
     private static final java.util.Set<String> NOT_EXPORTED = java.util.Set.of("customFields", "version",
-            "captureRequestedAt", "captureFinishedAt", "captureMessage");
+            "captureRequestedAt", "captureFinishedAt", "captureMessage", "autoRunMessage");
 
     private final CustomFieldService customFields;
 

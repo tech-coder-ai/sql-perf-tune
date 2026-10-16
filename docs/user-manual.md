@@ -29,7 +29,8 @@ row to its group and tracker item.
 | Section | Screen | Purpose |
 |---|---|---|
 | Overview | **Command center** (start page) | Today's headline numbers, bad queries by hour, where the backlog stands, top patterns |
-| Overview | **Insights** | The 15 programme questions, each with a chart and a table view (§6) |
+| Overview | **Insights** | The 17 programme questions, each with a chart and a table view (§6) |
+| Tuning | **Work queues** | What your team has to act on now, by persona (§11) |
 | Tuning | **Pipeline board** | Every SQL being tuned as a card in its stage column, from Triage to Adopted (§7) |
 | Tuning | **Tuning tracker** | The full work list with all tracking columns; open an item for its journey, iterations and fields (§8) |
 | Data | **Query groups** | SQL grouped by fingerprint; expand a row to see its log rows; add groups to the tracker |
@@ -41,6 +42,8 @@ The app bar is available everywhere:
 - **Search** (*Find a SQL*): type `T-12` (tracker item), `#5` or `G-5` (group), a seq id, or any piece of SQL
   text, and jump straight to it.
 - **New tuning request**: register SQL that did not come from the logs (§8.4).
+- **Persona** (*Tuning team*, *Client Development Team*, *Business user*): who you are working as; it opens
+  your work queues (§11). The choice is remembered in this browser.
 - **Theme**: switches between light, dark and "follow my system".
 
 The menu icon collapses the navigation to icons; on a phone it opens as a drawer.
@@ -161,6 +164,16 @@ Group sizes and durations are therefore never inflated by repeated loads.
 
 ---
 
+### Bad and normal queries
+
+A query that runs **longer than 5 minutes** (Administration → Workflow settings, *Bad query when longer than*)
+is a **bad query**; shorter ones are **normal**. On Query logs the pinned **Class** column shows a red *Bad*
+or grey *Normal* pill, and the duration of a bad query is red.
+
+**By default Query logs, Query groups, the Command center and Insights show bad queries only.** Tick
+**Include normal queries** (Query logs) or **Include normal patterns** (Query groups) to see everything. The
+subtitle always says which you are looking at. Use **Ran from / to** to limit Query logs to a period.
+
 ## 4. Query groups
 
 A **query group** is all log rows whose SQL is the same once you ignore:
@@ -182,6 +195,11 @@ Different selected columns, joins or GROUP BY make a different group.
 | Row indices | `seq_id`s of the member rows |
 | Fingerprint | Technical grouping key |
 | Tracker | Tracker status, or **Track** to add the group |
+| Pattern | **Bad pattern** (at least 2 bad runs: a tuning candidate), **Adhoc only** (a single bad run),
+**Adhoc closed** (single bad run, not seen for 45 days) or **Normal** (no bad run) |
+
+- **Bad queries from / to** limits the list to patterns with bad runs in that period; **Pattern** filters by
+  the class above; **Reset** clears the filters. Settings for the numbers: Administration → Workflow settings.
 
 - **Click a row** (or its chevron) to expand it: you see the normalized SQL and the group's log rows.
 - Tick several groups and press **Add N to tracker** to put them on the work list.
@@ -247,21 +265,22 @@ the same way when you change the day, period or windows.
 
 ---
 
-## 6. Insights: the 15 questions
+## 6. Insights: the programme questions
 
 The Insights page has an index on the left grouped as *Today*, *Tuning outcomes*, *Backlog & priorities*,
-*Users* and *Trends*; click a question to jump to it. The controls at the top set the inputs:
+*Users*, *Trends* and *Workflow*; click a question to jump to it. The controls at the top set the inputs:
 
 | Control | Used by |
 |---|---|
-| **Day** | Q1–Q4, Q8 |
+| **Day** (the **Yesterday** button picks the previous day and its period) | Q1–Q4, Q8, Q16 |
 | **Period** (7 days, 30 days, month to date, 90 days, custom) | Q5, Q7, Q9, Q11, Q13, Q15 |
 | **Trend** (6 / 12 / 24 months) | Q10, Q14 |
 | **Theme window** | Q12 |
 
 **Definitions** used by every answer:
 
-- **Bad query:** one row of the injected query log (the daily bad-query extract), dated by its start time.
+- **Bad query:** a loaded query that ran longer than the bad-query threshold (5 minutes by default), dated by its
+  start time. Normal queries are not counted anywhere on this page.
 - **Pattern:** a query group, i.e. the same SQL ignoring its WHERE filters.
 - **Recurring:** the pattern had already been seen on an earlier day.
 - **Optimized:** the tracker item has at least one candidate iteration (stage *Candidate ready* or later).
@@ -289,6 +308,8 @@ The Insights page has an index on the left grouped as *Today*, *Tuning outcomes*
 | Q13 | Which users always have bad SQL? | Users ranked by how consistently they produce bad SQL; a **repeat user** had bad SQL on at least half the days of the period (5+ queries) |
 | Q14 | Proactive (UAT) tuning vs user requests | Items per month by source: detected in logs, proactive UAT, user request |
 | Q15 | Which queries wait for adoption, and which optimizations were rejected and why? | Waiting list (oldest first), rejections by reason and the latest rejections |
+| Q16 | How many bad patterns are one-and-done? | Patterns whose only bad run was on the day (adhoc only, not worth tuning), per day, and their share of the day's bad patterns |
+| Q17 | Which adopted SQL came back? | Adopted items whose old SQL ran badly again after adoption, with the runs since (follow up with the users) |
 
 **From a number to the log rows.** Charts and lists that count bad queries open **Query logs** with those rows
 (the tooltip says so):
@@ -320,6 +341,8 @@ Every tracker item is a card in the column of its **stage**:
 | **Awaiting adoption** | The selected iteration is with the users / SMEs |
 | **Adopted** | Implemented by the users |
 | **Rejected** / **On hold** | Closed without adoption / parked |
+| **Tuning exception** | Nothing more can be done for this SQL; it is not tuned again (§10.5) |
+| **Awaiting fix** | The root cause is architectural; waits for its theme's fix (§10.5) |
 
 A card shows the item id, priority, source (e.g. *proactive UAT*), theme, the SQL, its runs and total
 time, the number of iterations, the lead, and how long it has been in the stage (the clock turns amber and
@@ -406,7 +429,7 @@ rewrites an iteration has, the faster it "runs". The answers say *Simulated answ
 
 Fields with a fixed set of values are **dropdowns**: Stage, Priority, Theme, Request source, Environment,
 Dev team status, Optimized SQL, Cloudera post-run validation, SME validation, Install, Execute and
-Validation. Administrators maintain the values (§10). The other fields are: Dev / Cloudera / SME team
+Validation. Administrators maintain the values (§12). The other fields are: Dev / Cloudera / SME team
 leads; before/after metrics; Problem, Changes, Recommendations; and any **custom columns**.
 
 - *OG / post-run duration (min)*: total run time before / after tuning; the improvement % is calculated.
@@ -478,8 +501,92 @@ Open a group (from Query Groups or *Diagnostics & AI agent* on a tracker item).
 
 ---
 
-## 10. Administration
+## 10. Automatic tuning workflow
 
+Every tracker item has a **Diagnostic ID** (`DX-000123`), shown on the item's header, in the tracker grid
+and in every e-mail. Quote it when you talk about the SQL with other teams.
+
+### 10.1 The automatic round
+
+After each import (and every morning at 06:15) the application runs one **automatic round** without clicks:
+
+1. **Track candidates:** every *Bad pattern* (≥ 2 bad runs) that is not on the tracker yet is added, longest
+   total time first, up to 25 per round. Adhoc-only patterns are not tracked.
+2. **Capture diagnostics:** explain plan, profile and table DDL (§8.6).
+3. **Run the optimization agent** with the active prompt.
+4. **Test the iteration:** the tuned SQL is run and compared with the original (run time, CPU, rows, memory,
+   and whether the results match).
+5. **Route the result** (comparison module):
+
+| Result | Where it goes | E-mail to |
+|---|---|---|
+| Results match and faster by **more than 15 %** | Selected; the item goes to **Awaiting adoption** | the users (*adoption recipients*) |
+| Results match, **15 % or less** faster | Stays *Tested* for the tuning team | the tuning team |
+| Results differ, the test failed, or a step failed | Stopped | the tuning team |
+
+The item's **Overview** shows a banner while the round runs and its outcome after; the grid has the
+columns *Automatic round* and *Result*. The tracker never stops you: you can tune by hand at any time.
+**Run the automatic round now** (Administration → Workflow settings) starts a round immediately.
+
+*Current build:* Impala and the LLM are simulated (§8.6, §9), so the numbers are samples.
+
+### 10.2 E-mails
+
+E-mails are sent when an item is **ready for adoption** (to the users) or **needs the tuning team**. They
+contain the Diagnostic ID, the SQL pattern, runs and users, run time / CPU / rows / memory before and after
+with the gain, whether the results match, how the SQL was tuned, the tuned and the original SQL, and a link
+to the item.
+
+- Turn sending on or off and set the recipient lists in **Administration → Workflow settings**.
+- Every e-mail is listed in **Administration → Notifications** (with a preview) and on the item's Overview,
+  with its status: *Sent*, *Logged* (recorded only; no mail server configured yet), *Failed*, *Disabled*
+  (sending was off) or *No recipients*.
+
+### 10.3 Adhoc-only SQL
+
+A pattern with a single bad run is **Adhoc only**: it is listed but not tuned. If it does not run again
+for 45 days it becomes **Adhoc closed**. If it runs badly again it becomes a *Bad pattern* and the next
+round tracks it.
+
+### 10.4 Follow-up and reappearing SQL
+
+- Items with the users for more than **3 weeks** without adoption are listed under *Follow up* for the
+  Client Development Team.
+- When an **adopted** SQL runs badly again (another user or a functional id still uses the old SQL), it is
+  listed under *Came back after adoption* and in Insights Q17.
+
+### 10.5 Evaluating an error
+
+On an item, **Evaluate error** records why it cannot be tuned now:
+
+- **Awaiting a theme fix:** the root cause is architectural (e.g. a missing partition scheme). Pick the
+  **theme** and describe the root cause. When the fix is released, the tuning team presses **Fix released:
+  retry** on the theme in Work queues; every item of the theme is reopened and goes through the automatic
+  round again.
+- **Tuning exception:** nothing more can be done; give the reason. The item is not tuned again.
+
+**Reopen for tuning** brings either back to *Tuning*. Record the analysis in *Root-cause analysis* on the
+Tracking tab (root cause and how the prompt could be improved).
+
+## 11. Work queues
+
+Pick your persona in the app bar; Work queues opens your tabs, each with a count. Rows open the item.
+
+| Persona | Queues |
+|---|---|
+| **Client Development Team** | *Promote for adoption* (largest saving first), *Follow up*, *Came back after adoption* |
+| **Business user** | *Tuned SQL to test*: **Works** (attest that the tuned SQL gives the right results), **Adopted** (you use it now), **Didn't work** (with a reason; the item goes back to the tuning team) |
+| **Tuning team** | *Below the threshold*, *Failed*, *Rejected by users*, *Awaiting a theme fix* (grouped by theme, with **Fix released: retry**), *Tuning exceptions* |
+
+---
+
+## 12. Administration
+
+- **Workflow settings:** bad-query threshold (minutes), bad runs needed to tune a pattern, days before an
+  adhoc SQL is closed, automatic round on / off and its size, the adoption threshold (%), e-mail on / off,
+  the recipient lists (comma or semicolon separated), the follow-up weeks and the application link used in
+  e-mails. A changed value applies within seconds; an empty value goes back to the default.
+- **Notifications:** every e-mail the application produced, with status and preview.
 - **Dropdown values:** the values offered in the tracker's dropdowns: Theme, Dev team status, Optimized
   SQL, Cloudera post-run validation, SME validation, Install, Execute, Validation, Environment and Rejection
   reason. Add a value, rename it, set its colour (tone) and order, or deactivate it. A deactivated value stays
@@ -499,7 +606,7 @@ Open a group (from Query Groups or *Diagnostics & AI agent* on a tracker item).
 
 ---
 
-## 11. FAQ
+## 13. FAQ
 
 **I uploaded the same file twice by mistake. Do I need to clean up?**
 No. The second upload is flagged as a duplicate and nothing is processed again.
@@ -521,6 +628,13 @@ On Query logs, and grouped on Query groups. Cancelling keeps what was loaded and
 **Why does an item say "Awaiting adoption" when it was rejected yesterday?**
 A rejection of one iteration sends the item back to *Tuning*. Once the team selects another iteration
 it is with the users again. The rejection and its reason remain in History and in Insights Q15.
+
+**Why don't I see a query that took 3 minutes?**
+Lists show bad queries (longer than 5 minutes) by default. Tick *Include normal queries*, or ask an
+administrator to change the threshold.
+
+**The e-mail says "Logged". Did anybody get it?**
+No. *Logged* means the application recorded the e-mail but no mail server or mail endpoint is configured yet.
 
 **Can we change the stages or dropdown values?**
 Dropdown values: yes, in Administration → Dropdown values. The workflow stages are fixed in the application

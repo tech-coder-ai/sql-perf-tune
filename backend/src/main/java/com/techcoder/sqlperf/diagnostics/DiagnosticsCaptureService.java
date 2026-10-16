@@ -55,11 +55,14 @@ public class DiagnosticsCaptureService {
     private final Executor executor;
     private final TransactionTemplate tx;
     private final boolean autoCapture;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     public DiagnosticsCaptureService(TuningTrackerRepository trackers, QueryGroupRepository groups,
                                      SqlDiagnosticRepository diagnostics, WorkflowService workflow,
                                      QueryMetadataClient client, @Qualifier("diagnosticsExecutor") Executor executor,
-                                     TransactionTemplate tx, SptProperties props) {
+                                     TransactionTemplate tx, SptProperties props,
+                                     org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
         this.trackers = trackers;
         this.groups = groups;
         this.diagnostics = diagnostics;
@@ -174,5 +177,10 @@ public class DiagnosticsCaptureService {
 
     private void finish(Long trackerId, CaptureStatus status, String message) {
         tx.executeWithoutResult(s -> trackers.setCapture(trackerId, status, LocalDateTime.now(), message));
+        events.publishEvent(new CaptureFinished(trackerId, status, message));
+    }
+
+    /** Published (outside any transaction) when an automatic capture ends. */
+    public record CaptureFinished(Long trackerId, CaptureStatus status, String message) {
     }
 }

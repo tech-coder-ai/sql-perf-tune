@@ -5,11 +5,13 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatDialog } from '@angular/material/dialog';
 import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
+import { MatMenuModule } from '@angular/material/menu';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { map } from 'rxjs';
+import { PERSONAS, Persona, PersonaStore } from '../core/persona';
 import { loadPref, savePref } from '../core/prefs';
 import { ThemeService } from '../core/theme';
 import { RequestDialog } from '../shared/request-dialog';
@@ -39,6 +41,7 @@ interface NavSection {
     MatIconModule,
     MatButtonModule,
     MatTooltipModule,
+    MatMenuModule,
     GlobalSearch,
   ],
   templateUrl: './shell.html',
@@ -48,6 +51,10 @@ export class Shell {
   protected readonly theme = inject(ThemeService);
   private readonly bp = inject(BreakpointObserver);
   private readonly dialog = inject(MatDialog);
+  private readonly router = inject(Router);
+  protected readonly persona = inject(PersonaStore);
+  protected readonly personas = PERSONAS;
+  protected readonly personaIcon = computed(() => PERSONAS.find((p) => p.key === this.persona.persona())?.icon ?? 'person');
 
   protected readonly compact = toSignal(this.bp.observe('(max-width: 960px)').pipe(map((r) => r.matches)), {
     initialValue: false,
@@ -63,12 +70,13 @@ export class Shell {
       title: 'Overview',
       items: [
         { path: '/home', label: 'Command center', icon: 'space_dashboard', hint: "Today's bad queries and backlog" },
-        { path: '/insights', label: 'Insights', icon: 'insights', hint: 'Answers to the 15 programme questions' },
+        { path: '/insights', label: 'Insights', icon: 'insights', hint: 'Answers to the 17 programme questions' },
       ],
     },
     {
       title: 'Tuning',
       items: [
+        { path: '/queues', label: 'Work queues', icon: 'assignment_ind', hint: 'What your team has to act on (by persona)' },
         { path: '/pipeline', label: 'Pipeline board', icon: 'view_kanban', hint: 'Every SQL by stage until adoption' },
         { path: '/tracker', label: 'Tuning tracker', icon: 'fact_check', hint: 'All tracking columns, export' },
       ],
@@ -89,6 +97,11 @@ export class Shell {
   toggleMini(): void {
     this.mini.update((v) => !v);
     savePref('nav.mini', this.mini());
+  }
+
+  setPersona(p: Persona): void {
+    this.persona.set(p);
+    this.router.navigate(['/queues']);
   }
 
   newRequest(): void {

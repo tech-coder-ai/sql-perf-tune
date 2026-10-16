@@ -200,7 +200,21 @@ public class IterationService {
             trackers.changeStatus(t, WorkflowStatus.SME_VALIDATION);
         }
         touch(t);
+        if (events != null) {
+            events.publishEvent(new IterationSelected(trackerId, id));
+        }
         return dto(i, t, best(all).map(TuningIteration::getId).orElse(null));
+    }
+
+    /** Published inside the selecting transaction: the iteration goes to the users for adoption. */
+    public record IterationSelected(Long trackerId, Long iterationId) {
+    }
+
+    private org.springframework.context.ApplicationEventPublisher events;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setEvents(org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
     }
 
     /** End users adopted the iteration: the item is done. */

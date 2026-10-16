@@ -52,13 +52,16 @@ public class WorkflowService {
     private final LookupService lookups;
     private final Executor agentExecutor;
     private final TransactionTemplate tx;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     public WorkflowService(QueryGroupRepository groups, SqlDiagnosticRepository diagnostics, TableDdlRepository ddls,
                            PromptTemplateRepository prompts, OptimizationRunRepository runs,
                            FeedbackRepository feedback, TuningTrackerRepository trackers, TrackerService trackerService,
                            ImpalaProfileParser profileParser, PromptRenderer renderer, List<OptimizationAgent> agents,
                            JsonMapper json, IterationService iterations, LookupService lookups,
-                           @Qualifier("agentExecutor") Executor agentExecutor, TransactionTemplate tx) {
+                           @Qualifier("agentExecutor") Executor agentExecutor, TransactionTemplate tx,
+                           org.springframework.context.ApplicationEventPublisher events) {
+        this.events = events;
         this.groups = groups;
         this.diagnostics = diagnostics;
         this.ddls = ddls;
@@ -297,6 +300,11 @@ public class WorkflowService {
     @Transactional
     public OptimizationRun startOptimization(Long groupId, Long promptTemplateId) {
         QueryGroup g = group(groupId);
+        trackers.findByGroupId(groupId).filter(t -> t.getWorkflowStatus() == WorkflowStatus.TUNING_EXCEPTION)
+                .ifPresent(t -> {
+                    throw new IllegalArgumentException("T-" + t.getId() + " is a tuning exception: it is not sent to "
+                            + "the optimization agent any more (" + t.getExceptionReason() + ")");
+                });
         PromptTemplate tpl = template(g, promptTemplateId);
         SqlDiagnostic original = latestOriginal(groupId);
 
@@ -330,6 +338,22 @@ public class WorkflowService {
 
     /** Background part of a run: ask the agent (no transaction held), then store the answer as the requester. */
     void callAgent(Long runId, OptimizationAgent.Request req) {
+        try {
+            askAgent(runId, req);
+        } finally {
+            OptimizationRun run = tx.execute(s -> runs.findById(runId).orElse(null));
+            if (run != null && run.getStatus() != OptimizationRun.Status.PENDING) {
+                events.publishEvent(new AgentAnswered(runId, run.getGroupId(), run.getStatus(),
+                        tx.execute(s -> iterations.byRun(runId).map(TuningIteration::getId).orElse(null))));
+            }
+        }
+    }
+
+    /** Published (outside any transaction) when an automatic agent run ends; iterationId = the iteration it made. */
+    public record AgentAnswered(Long runId, Long groupId, OptimizationRun.Status status, Long iterationId) {
+    }
+
+    private void askAgent(Long runId, OptimizationAgent.Request req) {
         String model = agent.modelName();
         try {
             Optional<String> answer = agent.optimize(req);

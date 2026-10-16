@@ -55,4 +55,18 @@ public interface TuningTrackerRepository extends JpaRepository<TuningTracker, Lo
             + " t.captureFinishedAt = null, t.captureMessage = null where t.id = :id")
     int requestCapture(@Param("id") Long id, @Param("status") TuningTracker.CaptureStatus status,
                        @Param("requestedAt") java.time.LocalDateTime requestedAt);
+
+    /** Automatic first run and comparison bookkeeping (bulk updates: no row-version bump, see setCapture). */
+    @Modifying(flushAutomatically = true)
+    @Query("update TuningTracker t set t.autoRunStatus = :status, t.autoRunMessage = :message where t.id = :id")
+    int setAutoRun(@Param("id") Long id, @Param("status") TuningTracker.AutoRunStatus status,
+                   @Param("message") String message);
+
+    @Modifying(flushAutomatically = true)
+    @Query("update TuningTracker t set t.resultStatus = :status where t.id = :id")
+    int setResultStatus(@Param("id") Long id, @Param("status") TuningTracker.ResultStatus status);
+
+    @Modifying(flushAutomatically = true)
+    @Query("update TuningTracker t set t.notifiedAt = :at where t.id = :id")
+    int setNotifiedAt(@Param("id") Long id, @Param("at") java.time.LocalDateTime at);
 }

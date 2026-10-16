@@ -4,7 +4,7 @@
 --
 -- !!! DESTRUCTIVE: all SPT data (logs, groups, tracker, history) is lost. !!!
 --
--- Equivalent to Flyway migrations V1-V6 (backend/src/main/resources/db/migration/oracle)
+-- Equivalent to Flyway migrations V1-V7 (backend/src/main/resources/db/migration/oracle)
 -- in a single script, for DBAs who build or reset an environment by hand.
 --
 -- Run as the schema owner (e.g. SPT_OWNER, see 00_create_schema.sql) with SQL*Plus, SQLcl or
@@ -12,8 +12,8 @@
 --     sqlplus SPT_OWNER@//host:1521/SERVICE @01_drop_and_create_schema.sql
 --
 -- Flyway: the script also drops "flyway_schema_history". Start the service once with
---     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=6
--- so Flyway records this schema as version 6 and only applies newer migrations (V7+).
+--     SPRING_FLYWAY_BASELINE_ON_MIGRATE=true  SPRING_FLYWAY_BASELINE_VERSION=7
+-- so Flyway records this schema as version 7 and only applies newer migrations (V8+).
 -- (Or set spring.flyway.enabled=false and keep the schema up to date with scripts.)
 --
 -- Contents
@@ -58,6 +58,7 @@ BEGIN
     FOR t IN (
         SELECT COLUMN_VALUE AS NAME
           FROM TABLE(SYS.ODCIVARCHAR2LIST(
+                'SPT_NOTIFICATION', 'SPT_THEME_FIX', 'SPT_SETTING',
                 'SPT_CUSTOM_FIELD_VALUE', 'SPT_CUSTOM_FIELD', 'SPT_AUDIT_EVENT',
                 'SPT_FEEDBACK', 'SPT_SQL_DIAGNOSTIC', 'SPT_TABLE_DDL',
                 'SPT_TUNING_ITERATION', 'SPT_OPTIMIZATION_RUN', 'SPT_PROMPT_TEMPLATE',
@@ -317,6 +318,16 @@ CREATE TABLE SPT_TUNING_TRACKER (
     CAPTURE_REQUESTED_AT            TIMESTAMP,
     CAPTURE_FINISHED_AT             TIMESTAMP,
     CAPTURE_MESSAGE                 VARCHAR2(1000),
+    DIAGNOSTIC_ID                   VARCHAR2(30),
+    RESULT_STATUS                   VARCHAR2(30),
+    AUTO_RUN_STATUS                 VARCHAR2(20),
+    AUTO_RUN_MESSAGE                VARCHAR2(1000),
+    NOTIFIED_AT                     TIMESTAMP,
+    ROOT_CAUSE                      CLOB,
+    PROMPT_IMPROVEMENT              CLOB,
+    EXCEPTION_REASON                VARCHAR2(2000),
+    EXCEPTION_BY                    VARCHAR2(100),
+    EXCEPTION_AT                    TIMESTAMP,
     CREATED_AT                      TIMESTAMP       NOT NULL,
     CREATED_BY                      VARCHAR2(100),
     UPDATED_AT                      TIMESTAMP,
@@ -327,10 +338,15 @@ CREATE TABLE SPT_TUNING_TRACKER (
     CONSTRAINT FK_SPT_TRACKER_GROUP FOREIGN KEY (GROUP_ID) REFERENCES SPT_QUERY_GROUP (ID),
     CONSTRAINT CK_SPT_TRACKER_PRIORITY CHECK (PRIORITY IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     CONSTRAINT CK_SPT_TRACKER_SOURCE CHECK (REQUEST_SOURCE IN ('LOG_DETECTED', 'PROACTIVE_UAT', 'USER_REQUEST')),
-    CONSTRAINT CK_SPT_TRACKER_CAPTURE CHECK (CAPTURE_STATUS IN ('PENDING', 'RUNNING', 'DONE', 'FAILED'))
+    CONSTRAINT CK_SPT_TRACKER_CAPTURE CHECK (CAPTURE_STATUS IN ('PENDING', 'RUNNING', 'DONE', 'FAILED')),
+    CONSTRAINT CK_SPT_TRACKER_RESULT CHECK (RESULT_STATUS IN ('READY_FOR_ADOPTION', 'NEEDS_SME_REVIEW', 'FAILED')),
+    CONSTRAINT CK_SPT_TRACKER_AUTORUN CHECK (AUTO_RUN_STATUS IN ('PENDING', 'RUNNING', 'DONE', 'FAILED'))
 );
+CREATE UNIQUE INDEX UK_SPT_TRACKER_DIAG ON SPT_TUNING_TRACKER (DIAGNOSTIC_ID);
+COMMENT ON COLUMN SPT_TUNING_TRACKER.DIAGNOSTIC_ID IS 'Correlation id between the tool, the diagnostic submission and the Cloudera team reply.';
+COMMENT ON COLUMN SPT_TUNING_TRACKER.RESULT_STATUS IS 'Comparison module: READY_FOR_ADOPTION, NEEDS_SME_REVIEW, FAILED.';
 COMMENT ON TABLE SPT_TUNING_TRACKER IS 'Tuning tracker: one item per query group being tuned, from triage to adoption.';
-COMMENT ON COLUMN SPT_TUNING_TRACKER.WORKFLOW_STATUS IS 'Stage: NEW, DIAGNOSTICS_CAPTURED, OPTIMIZATION_REQUESTED, OPTIMIZED, POST_RUN_VALIDATED, SME_VALIDATION, ADOPTED, REJECTED, ON_HOLD.';
+COMMENT ON COLUMN SPT_TUNING_TRACKER.WORKFLOW_STATUS IS 'Stage: NEW, DIAGNOSTICS_CAPTURED, OPTIMIZATION_REQUESTED, OPTIMIZED, POST_RUN_VALIDATED, SME_VALIDATION, ADOPTED, REJECTED, ON_HOLD, TUNING_EXCEPTION, AWAITING_FIX.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.STAGE_CHANGED_AT IS 'When the item entered its current stage.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.SELECTED_ITERATION_ID IS 'Iteration selected for adoption; its SQL and post-run metrics are copied here.';
 COMMENT ON COLUMN SPT_TUNING_TRACKER.CAPTURE_STATUS IS 'Automatic explain / profile / DDL fetch: PENDING, RUNNING, DONE, FAILED.';
@@ -589,6 +605,46 @@ CREATE SEQUENCE SPT_QUERY_LOG_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
 CREATE SEQUENCE SPT_QUERY_LOG_SIGHTING_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
 CREATE SEQUENCE SPT_QUERY_GROUP_SEQ START WITH 1 INCREMENT BY 1000 NOCYCLE;
 
+-- ---------------------------------------------------------------------
+-- Tuning workflow (V7): admin settings, e-mail outbox, theme fixes
+-- ---------------------------------------------------------------------
+CREATE TABLE SPT_SETTING (
+    SETTING_KEY    VARCHAR2(100)   NOT NULL,
+    SETTING_VALUE  VARCHAR2(4000),
+    UPDATED_AT     TIMESTAMP       NOT NULL,
+    UPDATED_BY     VARCHAR2(100),
+    CONSTRAINT PK_SPT_SETTING PRIMARY KEY (SETTING_KEY)
+);
+COMMENT ON TABLE SPT_SETTING IS 'Workflow settings edited in Administration; missing keys use the application defaults.';
+
+CREATE TABLE SPT_NOTIFICATION (
+    ID             NUMBER(19)      GENERATED BY DEFAULT AS IDENTITY,
+    TRACKER_ID     NUMBER(19),
+    KIND           VARCHAR2(40)    NOT NULL,
+    RECIPIENTS     VARCHAR2(2000),
+    SUBJECT        VARCHAR2(500)   NOT NULL,
+    BODY           CLOB,
+    STATUS         VARCHAR2(20)    NOT NULL,
+    ERROR_MESSAGE  VARCHAR2(2000),
+    CREATED_AT     TIMESTAMP       NOT NULL,
+    SENT_AT        TIMESTAMP,
+    CONSTRAINT PK_SPT_NOTIFICATION PRIMARY KEY (ID),
+    CONSTRAINT FK_SPT_NOTIF_TRACKER FOREIGN KEY (TRACKER_ID) REFERENCES SPT_TUNING_TRACKER (ID),
+    CONSTRAINT CK_SPT_NOTIF_STATUS CHECK (STATUS IN ('PENDING', 'SENT', 'LOGGED', 'FAILED', 'DISABLED', 'NO_RECIPIENTS'))
+);
+CREATE INDEX IX_SPT_NOTIF_TRACKER ON SPT_NOTIFICATION (TRACKER_ID);
+COMMENT ON TABLE SPT_NOTIFICATION IS 'E-mail outbox: READY_FOR_ADOPTION (users), NEEDS_SME_REVIEW (tuning team).';
+
+CREATE TABLE SPT_THEME_FIX (
+    ID             NUMBER(19)      GENERATED BY DEFAULT AS IDENTITY,
+    THEME          VARCHAR2(200)   NOT NULL,
+    NOTES          VARCHAR2(2000),
+    ITEMS_RETRIED  NUMBER(10)      DEFAULT 0 NOT NULL,
+    RELEASED_AT    TIMESTAMP       NOT NULL,
+    RELEASED_BY    VARCHAR2(100),
+    CONSTRAINT PK_SPT_THEME_FIX PRIMARY KEY (ID)
+);
+
 -- =====================================================================
 -- 3. VIEW: tracking screen = tracker + live group metrics
 -- =====================================================================
@@ -786,4 +842,6 @@ PROMPT
 PROMPT SPT schema re-created. Rows loaded:
 SELECT 'SPT_PROMPT_TEMPLATE' AS TABLE_NAME, COUNT(*) AS ROW_COUNT FROM SPT_PROMPT_TEMPLATE
 UNION ALL
-SELECT 'SPT_LOOKUP', COUNT(*) FROM SPT_LOOKUP;
+SELECT 'SPT_LOOKUP', COUNT(*) FROM SPT_LOOKUP
+UNION ALL
+SELECT 'SPT_SETTING (defaults apply)', COUNT(*) FROM SPT_SETTING;

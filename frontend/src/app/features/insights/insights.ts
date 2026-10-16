@@ -17,6 +17,7 @@ import {
   SavingsInsight,
   ThemePriority,
   TrendsInsight,
+  WorkflowInsight,
   UsersInsight,
 } from '../../core/models';
 import { REQUEST_SOURCE_LABEL, STAGE } from '../../core/stages';
@@ -37,7 +38,7 @@ interface Section {
   questions: Question[];
 }
 
-type Preset = '7d' | '30d' | 'mtd' | '90d' | 'custom';
+type Preset = 'yesterday' | '7d' | '30d' | 'mtd' | '90d' | 'custom';
 
 /** Answers to the programme's 15 questions, grouped by theme, each with chart + table view. */
 @Component({
@@ -112,6 +113,13 @@ export class Insights {
         { q: 'Q14', anchor: 'q14', text: 'Proactive (UAT) vs user tuning requests' },
       ],
     },
+    {
+      title: 'Workflow',
+      questions: [
+        { q: 'Q16', anchor: 'q16', text: "How many bad SQL are one and done ('adhoc only')?" },
+        { q: 'Q17', anchor: 'q17', text: 'Which adopted SQL came back as bad SQL?' },
+      ],
+    },
   ];
 
   // ---- controls
@@ -129,6 +137,10 @@ export class Insights {
   protected readonly themes = signal<ThemePriority[]>([]);
   protected readonly users = signal<UsersInsight | null>(null);
   protected readonly trends = signal<TrendsInsight | null>(null);
+  protected readonly workflow = signal<WorkflowInsight | null>(null);
+  protected readonly q16Days = computed(() =>
+    (this.workflow()?.oneAndDoneByDay ?? []).map((d) => ({ label: d.label.substring(5), value: d.count, title: d.label })),
+  );
   protected readonly loading = signal(false);
 
   constructor() {
@@ -145,6 +157,7 @@ export class Insights {
       themes: this.api.themePriorities(this.themeDays),
       users: this.api.usersInsight({ from: this.from, to: this.to }),
       trends: this.api.trends(this.months),
+      workflow: this.api.workflowInsight(this.day()),
     }).subscribe({
       next: (r) => {
         if (seq !== this.loadSeq) return; // a newer day / period was asked for meanwhile
@@ -154,6 +167,7 @@ export class Insights {
         this.themes.set(r.themes);
         this.users.set(r.users);
         this.trends.set(r.trends);
+        this.workflow.set(r.workflow);
         this.loading.set(false);
       },
       error: () => seq === this.loadSeq && this.loading.set(false),
@@ -166,6 +180,14 @@ export class Insights {
   setPreset(p: Preset): void {
     this.preset = p;
     const t = today();
+    if (p === 'yesterday') {
+      // the daily extract covers the day before: one day, and the day-based cards follow it
+      this.from = addDays(t, -1);
+      this.to = this.from;
+      this.day.set(this.from);
+      this.loadAll();
+      return;
+    }
     if (p === '7d') this.from = addDays(t, -6);
     if (p === '30d') this.from = addDays(t, -29);
     if (p === '90d') this.from = addDays(t, -89);
@@ -263,7 +285,7 @@ export class Insights {
     const stages: Record<string, string[]> = {
       IN_PROGRESS: ['NEW', 'DIAGNOSTICS_CAPTURED', 'OPTIMIZATION_REQUESTED', 'OPTIMIZED', 'POST_RUN_VALIDATED'],
       AWAITING: ['SME_VALIDATION'],
-      PARKED: ['ON_HOLD', 'REJECTED'],
+      PARKED: ['ON_HOLD', 'REJECTED', 'TUNING_EXCEPTION', 'AWAITING_FIX'],
     };
     this.router.navigate(['/tracker'], { queryParams: stageQuery(stages[String(r.key)], w) });
   }

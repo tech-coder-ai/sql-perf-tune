@@ -18,7 +18,12 @@ export const STAGE: Record<WorkflowStatus, StageInfo> = {
   ADOPTED: { label: 'Adopted', icon: 'verified', hint: 'Implemented by the users', tone: 'ok' },
   REJECTED: { label: 'Rejected', icon: 'block', hint: 'Closed without adoption', tone: 'bad' },
   ON_HOLD: { label: 'On hold', icon: 'pause_circle', hint: 'Parked', tone: 'muted' },
+  TUNING_EXCEPTION: { label: 'Tuning exception', icon: 'do_not_disturb_on', hint: 'Nothing more can be done; not tuned again', tone: 'muted' },
+  AWAITING_FIX: { label: 'Awaiting fix', icon: 'construction', hint: 'Waits for an architectural fix of its theme', tone: 'warn' },
 };
+
+/** Side exits after the happy path (board columns, pipeline bars). */
+export const SIDE_STAGES: WorkflowStatus[] = ['ON_HOLD', 'REJECTED', 'AWAITING_FIX', 'TUNING_EXCEPTION'];
 
 /** Happy path in order (board columns, journey steps). */
 export const STAGE_ORDER: WorkflowStatus[] = [

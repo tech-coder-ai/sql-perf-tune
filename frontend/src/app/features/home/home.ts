@@ -7,7 +7,7 @@ import { Router, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { Api } from '../../core/api';
 import { DailyInsight, PipelineInsight, SavingsInsight, WorkflowStatus } from '../../core/models';
-import { STAGE, STAGE_ORDER } from '../../core/stages';
+import { SIDE_STAGES, STAGE, STAGE_ORDER } from '../../core/stages';
 import { BarList, BarRow, ChartCard, ColumnChart, StatTile } from '../../shared/charts';
 import { addDays, minutesText, num, pct, signedPct, today } from '../../shared/dates';
 import { LogDrill, activeWindow, logsQuery, stageQuery, untrackedQuery } from '../../shared/drill';
@@ -57,7 +57,7 @@ export class Home {
         key: 'UNTRACKED',
       },
     ];
-    for (const s of [...STAGE_ORDER, 'ON_HOLD', 'REJECTED'] as WorkflowStatus[]) {
+    for (const s of [...STAGE_ORDER, ...SIDE_STAGES] as WorkflowStatus[]) {
       rows.push({ label: STAGE[s].label, value: by.get(s) ?? 0, sub: STAGE[s].hint, key: s });
     }
     return rows;

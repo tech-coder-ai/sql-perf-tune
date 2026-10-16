@@ -66,11 +66,11 @@ class PipelineDrillDownTest {
 
         // "Not tracked yet": untracked patterns active in the window -> Query groups
         var untracked = groupApi.search(0, 50, null, null,
-                new QueryGroupController.GroupFilter(null, null, null, null, null, false, from, to));
+                new QueryGroupController.GroupFilter(null, null, null, null, null, false, from, to, null, null));
         assertThat(untracked.totalElements()).isEqualTo(p.outstanding().untrackedPatterns()).isEqualTo(1);
         // without the window the old untracked pattern is listed too (the all-time figure)
         var allUntracked = groupApi.search(0, 50, null, null,
-                new QueryGroupController.GroupFilter(null, null, null, null, null, false, null, null));
+                new QueryGroupController.GroupFilter(null, null, null, null, null, false, null, null, null, null));
         assertThat(allUntracked.totalElements()).isEqualTo(p.outstanding().allTimeUntrackedPatterns()).isEqualTo(2);
 
         // a stage bar (all items in that stage) -> Tuning tracker filtered by the stage

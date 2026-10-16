@@ -93,7 +93,7 @@ class LogDrillDownTest {
     private static QueryLogController.LogFilter filter(String user, String userGroup, LocalDateTime from,
                                                        LocalDateTime to, String pattern) {
         return new QueryLogController.LogFilter(null, null, user, userGroup, null, null, null, null, null, null, null,
-                from, to, pattern);
+                from, to, pattern, null);
     }
 
     private long total(QueryLogController.LogFilter f) {

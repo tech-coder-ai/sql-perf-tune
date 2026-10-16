@@ -19,9 +19,12 @@ public final class ActiveWindow {
     private ActiveWindow() {
     }
 
-    /** @return null when neither bound is set */
-    public static Predicate of(Expression<Long> groupId, LocalDate from, LocalDate to, CriteriaQuery<?> cq,
-                               CriteriaBuilder cb) {
+    /**
+     * @param badMinMinutes only runs longer than this count (the bad-query threshold); null = any run
+     * @return null when neither bound is set
+     */
+    public static Predicate of(Expression<Long> groupId, LocalDate from, LocalDate to, Double badMinMinutes,
+                               CriteriaQuery<?> cq, CriteriaBuilder cb) {
         if (from == null && to == null) {
             return null;
         }
@@ -30,6 +33,9 @@ public final class ActiveWindow {
         Expression<java.time.LocalDateTime> ts = cb.coalesce(l.<java.time.LocalDateTime>get("startTime"),
                 l.<java.time.LocalDateTime>get("createdAt"));
         Predicate p = cb.equal(l.get("groupId"), groupId);
+        if (badMinMinutes != null) {
+            p = cb.and(p, cb.greaterThan(l.<Double>get("durationMinutes"), badMinMinutes));
+        }
         if (from != null) {
             p = cb.and(p, cb.greaterThanOrEqualTo(ts, from.atStartOfDay()));
         }

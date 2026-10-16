@@ -265,3 +265,34 @@
   justify-content: center;
   vertical-align: middle;
 }
+
+.diag-id {
+  font: 500 12px var(--spt-mono);
+  color: var(--spt-muted);
+  border: 1px dashed var(--spt-border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+.auto-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  background: var(--spt-post);
+  color: var(--spt-post-ink);
+
+  &.busy {
+    background: var(--spt-accent-soft);
+    color: var(--spt-info);
+  }
+
+  &.failed {
+    background: var(--spt-bad-soft);
+    color: var(--spt-bad);
+  }
+}

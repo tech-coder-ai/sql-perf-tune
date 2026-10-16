@@ -17,6 +17,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.OptimisticLock;
 import org.hibernate.type.SqlTypes;
 import lombok.Getter;
 import lombok.Setter;
@@ -33,8 +34,18 @@ public class TuningTracker {
 
     public enum WorkflowStatus {
         NEW, DIAGNOSTICS_CAPTURED, OPTIMIZATION_REQUESTED, OPTIMIZED, POST_RUN_VALIDATED, SME_VALIDATION,
-        ADOPTED, REJECTED, ON_HOLD
+        ADOPTED, REJECTED, ON_HOLD,
+        /** RCA exception: nothing more can be done; never sent to the agent or tuning team again (step 13). */
+        TUNING_EXCEPTION,
+        /** Root cause is architectural (a theme); waits for that fix, then is retried (steps 14-15). */
+        AWAITING_FIX
     }
+
+    /** Comparison module: where a tested result goes (step 5). */
+    public enum ResultStatus { READY_FOR_ADOPTION, NEEDS_SME_REVIEW, FAILED }
+
+    /** The automatic first tuning round of a newly tracked candidate. */
+    public enum AutoRunStatus { PENDING, RUNNING, DONE, FAILED }
 
     public enum Priority { LOW, MEDIUM, HIGH, CRITICAL }
 
@@ -108,13 +119,46 @@ public class TuningTracker {
     private Long selectedIterationId;
 
     /** Automatic diagnostics capture (null for items tracked before it existed). */
+    // bookkeeping written by the app, not by people: changing it does not bump the version (no edit conflicts)
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
+    @OptimisticLock(excluded = true)
     private CaptureStatus captureStatus;
+    @OptimisticLock(excluded = true)
     private LocalDateTime captureRequestedAt;
     private LocalDateTime captureFinishedAt;
     @Column(length = 1000)
     private String captureMessage;
+
+    /** Correlation id between the tool, the diagnostic submission and the Cloudera team's reply. */
+    @Column(length = 30)
+    @OptimisticLock(excluded = true)
+    private String diagnosticId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 30)
+    private ResultStatus resultStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private AutoRunStatus autoRunStatus;
+    @Column(length = 1000)
+    private String autoRunMessage;
+
+    /** When the users were told the tuned SQL is ready (adoption e-mail). */
+    private LocalDateTime notifiedAt;
+
+    /** Root-cause analysis by the tuning team (step 13). */
+    @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
+    private String rootCause;
+    /** What the prompt / agent should learn from this item ("Improve LLM"). */
+    @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
+    private String promptImprovement;
+
+    @Column(length = 2000)
+    private String exceptionReason;
+    private String exceptionBy;
+    private LocalDateTime exceptionAt;
 
     /** When the item entered its current workflow status. */
     private LocalDateTime stageChangedAt;

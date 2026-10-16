@@ -17,6 +17,21 @@
     <app-global-search />
   }
   <span class="spacer"></span>
+  <button mat-button class="on-blue persona" [matMenuTriggerFor]="personaMenu" [matTooltip]="'Working as: ' + persona.label()">
+    <mat-icon>{{ personaIcon() }}</mat-icon>
+    @if (!compact()) {
+      {{ persona.label() }}
+    }
+    <mat-icon iconPositionEnd>arrow_drop_down</mat-icon>
+  </button>
+  <mat-menu #personaMenu="matMenu">
+    @for (p of personas; track p.key) {
+      <button mat-menu-item (click)="setPersona(p.key)">
+        <mat-icon>{{ p.icon }}</mat-icon>
+        <span>{{ p.label }}</span>
+      </button>
+    }
+  </mat-menu>
   <button mat-stroked-button class="on-blue" (click)="newRequest()">
     <mat-icon>add_task</mat-icon>
     @if (!compact()) {

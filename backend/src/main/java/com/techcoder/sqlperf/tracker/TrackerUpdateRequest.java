@@ -52,5 +52,7 @@ public record TrackerUpdateRequest(
         String changes,
         String problem,
         String recommendations,
+        String rootCause,
+        String promptImprovement,
         Map<String, String> customFields) {
 }

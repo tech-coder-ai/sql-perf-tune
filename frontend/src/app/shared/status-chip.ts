@@ -29,6 +29,17 @@ const TONE: Record<string, string> = {
   USER_REQUEST: 'info',
   AI_AGENT: 'primary',
   MANUAL: 'muted',
+  READY_FOR_ADOPTION: 'ok',
+  NEEDS_SME_REVIEW: 'warn',
+  DONE: 'ok',
+  SENT: 'ok',
+  LOGGED: 'info',
+  DISABLED: 'muted',
+  NO_RECIPIENTS: 'warn',
+  BAD: 'bad',
+  NORMAL: 'muted',
+  ADHOC: 'warn',
+  ADHOC_CLOSED: 'muted',
 };
 
 const LABEL: Record<string, string> = {
@@ -37,6 +48,15 @@ const LABEL: Record<string, string> = {
   USER_REQUEST: 'user request',
   AI_AGENT: 'AI agent',
   SELECTED: 'selected for adoption',
+  READY_FOR_ADOPTION: 'ready for adoption',
+  NEEDS_SME_REVIEW: 'needs SME review',
+  LOGGED: 'recorded (not sent)',
+  DISABLED: 'e-mail off',
+  NO_RECIPIENTS: 'no recipients',
+  BAD: 'bad',
+  NORMAL: 'normal',
+  ADHOC: 'adhoc only',
+  ADHOC_CLOSED: 'adhoc only – closed',
 };
 
 /**

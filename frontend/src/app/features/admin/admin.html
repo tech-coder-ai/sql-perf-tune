@@ -7,6 +7,12 @@
   </div>
 
   <mat-tab-group animationDuration="0ms" mat-stretch-tabs="false" class="tabs">
+    <mat-tab label="Workflow settings">
+      <ng-template matTabContent><app-workflow-settings-panel /></ng-template>
+    </mat-tab>
+    <mat-tab label="Notifications">
+      <ng-template matTabContent><app-notifications-panel /></ng-template>
+    </mat-tab>
     <mat-tab label="Dropdown values">
       <div class="tab-body cols">
         <div>

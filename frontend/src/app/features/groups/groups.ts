@@ -6,14 +6,16 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AgGridAngular, ICellRendererAngularComp } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, ICellRendererParams, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
+import { WorkflowSettingsStore } from '../../core/workflow-settings';
 import { QueryGroup } from '../../core/models';
-import { LinkCell, errorCellRules, groupingDatasource, isGroupRow, minutesFormatter, numCol, serverGridOptions, sqlCol } from '../../shared/grid';
+import { LinkCell, StatusCell, errorCellRules, groupingDatasource, isGroupRow, minutesFormatter, numCol, serverGridOptions, sqlCol } from '../../shared/grid';
 import { StatusChip } from '../../shared/status-chip';
 import { GroupDetailRow } from './group-detail-row';
 
@@ -62,6 +64,7 @@ export class TrackerCell implements ICellRendererAngularComp {
     MatIconModule,
     MatTooltipModule,
     MatChipsModule,
+    MatCheckboxModule,
   ],
   templateUrl: './groups.html',
   styleUrl: './groups.scss',
@@ -84,7 +87,12 @@ export class Groups {
     /** only groups with bad queries between these days (links from the dashboards' pipeline bars) */
     activeFrom: null as string | null,
     activeTo: null as string | null,
+    includeNormal: false,
+    pattern: '',
   };
+  protected readonly settings = inject(WorkflowSettingsStore);
+  protected readonly minRuns = () =>
+    Number(this.settings.values().find((v) => v.definition.key === 'candidate.min-runs')?.value ?? 2);
 
   readonly gridOptions: GridOptions<QueryGroup> = {
     ...serverGridOptions<QueryGroup>(25),
@@ -125,6 +133,16 @@ export class Groups {
       sortable: true,
       cellRenderer: LinkCell,
       cellRendererParams: { link: (r: QueryGroup) => ['/groups', r.groupId], text: (r: QueryGroup) => '#' + r.groupId },
+    },
+    {
+      colId: 'patternClass',
+      field: 'patternClass',
+      headerName: 'Pattern',
+      headerTooltip: 'bad: tuning candidate · adhoc only: a single bad run so far · normal: never longer than the threshold',
+      width: 150,
+      pinned: 'left',
+      cellRenderer: StatusCell,
+      tooltip: (p) => (p.data && !isGroupRow(p.data) ? `${p.data.badRuns} bad runs of ${p.data.groupSize}` : null),
     },
     { colId: 'groupSize', field: 'groupSize', headerName: 'Group size', width: 115, sortable: true, enableRowGroup: true, ...numCol },
     {
@@ -193,6 +211,8 @@ export class Groups {
     this.filter.tracked = qp.get('tracked') ?? '';
     this.filter.activeFrom = qp.get('activeFrom');
     this.filter.activeTo = qp.get('activeTo');
+    this.filter.pattern = qp.get('pattern') ?? '';
+    this.settings.load();
     e.api.setGridOption(
       'serverSideDatasource',
       groupingDatasource<QueryGroup>(
@@ -214,16 +234,30 @@ export class Groups {
       minGroupSize: f.minGroupSize,
       minAvgDuration: f.minAvgDuration,
       tracked: f.tracked || null,
-      activeFrom: f.activeFrom,
-      activeTo: f.activeTo,
+      activeFrom: f.activeFrom || null,
+      activeTo: f.activeTo || null,
+      includeNormal: f.includeNormal || f.pattern === 'NORMAL' || null,
+      pattern: f.pattern || null,
     };
   }
 
-  dropWindow(): void {
-    this.filter.activeFrom = null;
-    this.filter.activeTo = null;
+  reset(): void {
+    this.filter = {
+      q: '',
+      userId: '',
+      minGroupSize: null,
+      minAvgDuration: null,
+      tracked: '',
+      activeFrom: null,
+      activeTo: null,
+      includeNormal: false,
+      pattern: '',
+    };
+    this.router.navigate([], { queryParams: {} });
     this.search();
   }
+
+
 
   search(): void {
     this.selected.set([]);

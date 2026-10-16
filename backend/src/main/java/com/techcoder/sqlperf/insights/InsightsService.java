@@ -27,6 +27,7 @@ import com.techcoder.sqlperf.group.QueryGroup;
 import com.techcoder.sqlperf.iteration.TuningIteration;
 import com.techcoder.sqlperf.iteration.TuningIterationRepository;
 import com.techcoder.sqlperf.tracker.TrackerDto;
+import com.techcoder.sqlperf.settings.WorkflowSettings;
 import com.techcoder.sqlperf.tracker.TrackerService;
 import com.techcoder.sqlperf.tracker.TuningTracker;
 import com.techcoder.sqlperf.tracker.TuningTracker.RequestSource;
@@ -70,12 +71,14 @@ public class InsightsService {
     private static final String UNCATEGORIZED = "Uncategorized";
 
     private final EntityManager em;
+    private final WorkflowSettings settings;
     private final TuningIterationRepository iterations;
     private final UserDirectoryRepository directory;
     private final TrackerService trackerService;
 
     public InsightsService(EntityManager em, TuningIterationRepository iterations, UserDirectoryRepository directory,
-                           TrackerService trackerService) {
+                           TrackerService trackerService, WorkflowSettings settings) {
+        this.settings = settings;
         this.em = em;
         this.iterations = iterations;
         this.directory = directory;
@@ -108,7 +111,7 @@ public class InsightsService {
 
         Map<Long, long[]> perGroup = new HashMap<>(); // groupId -> {count}
         Map<Long, Double> minutesPerGroup = new HashMap<>();
-        for (Object[] r : em.createQuery("select l.groupId, count(l), sum(l.durationMinutes) from QueryLog l where "
+        for (Object[] r : em.createQuery("select l.groupId, count(l), sum(l.durationMinutes) from QueryLog l where " + bad() + " and "
                         + TS + " >= :f and " + TS + " < :t and l.groupId is not null group by l.groupId", Object[].class)
                 .setParameter("f", from).setParameter("t", to).getResultList()) {
             perGroup.put((Long) r[0], new long[] {(Long) r[1]});
@@ -135,7 +138,7 @@ public class InsightsService {
         }
 
         long[] hours = new long[24];
-        for (Object[] r : em.createQuery("select hour(" + TS + "), count(l) from QueryLog l where " + TS
+        for (Object[] r : em.createQuery("select hour(" + TS + "), count(l) from QueryLog l where " + bad() + " and " + TS
                         + " >= :f and " + TS + " < :t group by hour(" + TS + ")", Object[].class)
                 .setParameter("f", from).setParameter("t", to).getResultList()) {
             if (r[0] != null) {
@@ -177,7 +180,7 @@ public class InsightsService {
         List<CountPoint> instanceBuckets = List.of(new CountPoint("1", buckets[0]), new CountPoint("2-5", buckets[1]),
                 new CountPoint("6-20", buckets[2]), new CountPoint("21+", buckets[3]));
 
-        List<CountPoint> topUsers = em.createQuery("select l.userId, count(l) from QueryLog l where " + TS + " >= :f and "
+        List<CountPoint> topUsers = em.createQuery("select l.userId, count(l) from QueryLog l where " + bad() + " and " + TS + " >= :f and "
                         + TS + " < :t and l.userId is not null group by l.userId order by count(l) desc", Object[].class)
                 .setParameter("f", from).setParameter("t", to).setMaxResults(10).getResultList().stream()
                 .map(r -> new CountPoint((String) r[0], (Long) r[1])).toList();
@@ -252,7 +255,7 @@ public class InsightsService {
         LocalDateTime activeTo = asOf.plusDays(1).atStartOfDay();
         LocalDateTime activeFrom = activeTo.minusDays(ACTIVE_DAYS);
         Map<Long, Long> recent = new HashMap<>();
-        for (Object[] r : em.createQuery("select l.groupId, count(l) from QueryLog l where " + TS + " >= :f and " + TS
+        for (Object[] r : em.createQuery("select l.groupId, count(l) from QueryLog l where " + bad() + " and " + TS + " >= :f and " + TS
                         + " < :t and l.groupId is not null group by l.groupId", Object[].class)
                 .setParameter("f", activeFrom).setParameter("t", activeTo).getResultList()) {
             recent.put((Long) r[0], (Long) r[1]);
@@ -266,7 +269,8 @@ public class InsightsService {
         long allPatterns = 0;
         long allQueries = 0;
         long allUntracked = 0;
-        for (Object[] r : em.createQuery("select g.id, g.groupSize from QueryGroup g where g.groupSize > 0", Object[].class)
+        for (Object[] r : em.createQuery("select g.id, g.groupSize from QueryGroup g where g.groupSize > 0 and g.maxDurationMinutes > "
+                + settings.badMinMinutes(), Object[].class)
                 .getResultList()) {
             TuningTracker t = byGroup.get((Long) r[0]);
             if (t != null && t.getWorkflowStatus() == WorkflowStatus.ADOPTED) {
@@ -287,7 +291,9 @@ public class InsightsService {
                 untracked++;
             } else if (t.getWorkflowStatus() == WorkflowStatus.SME_VALIDATION) {
                 awaiting++;
-            } else if (t.getWorkflowStatus() == WorkflowStatus.ON_HOLD || t.getWorkflowStatus() == WorkflowStatus.REJECTED) {
+            } else if (t.getWorkflowStatus() == WorkflowStatus.ON_HOLD || t.getWorkflowStatus() == WorkflowStatus.REJECTED
+                    || t.getWorkflowStatus() == WorkflowStatus.TUNING_EXCEPTION
+                    || t.getWorkflowStatus() == WorkflowStatus.AWAITING_FIX) {
                 parked++;
             } else {
                 inProgress++;
@@ -299,7 +305,7 @@ public class InsightsService {
         // Q4 prior day: of the patterns that produced bad queries that day, how many are optimized / categorized
         LocalDateTime pf = priorDay.atStartOfDay();
         Map<Long, Long> dayCounts = new HashMap<>();
-        for (Object[] r : em.createQuery("select l.groupId, count(l) from QueryLog l where " + TS + " >= :f and " + TS
+        for (Object[] r : em.createQuery("select l.groupId, count(l) from QueryLog l where " + bad() + " and " + TS + " >= :f and " + TS
                         + " < :t and l.groupId is not null group by l.groupId", Object[].class)
                 .setParameter("f", pf).setParameter("t", pf.plusDays(1)).getResultList()) {
             dayCounts.put((Long) r[0], (Long) r[1]);
@@ -526,7 +532,7 @@ public class InsightsService {
     public List<ThemePriority> themePriorities(int days) {
         LocalDateTime since = LocalDate.now().minusDays(days).atStartOfDay();
         Map<Long, double[]> recent = new HashMap<>(); // groupId -> {count, minutes}
-        for (Object[] r : em.createQuery("select l.groupId, count(l), sum(l.durationMinutes) from QueryLog l where " + TS
+        for (Object[] r : em.createQuery("select l.groupId, count(l), sum(l.durationMinutes) from QueryLog l where " + bad() + " and " + TS
                         + " >= :f and l.groupId is not null group by l.groupId", Object[].class)
                 .setParameter("f", since).getResultList()) {
             recent.put((Long) r[0], new double[] {(Long) r[1], r[2] == null ? 0 : ((Number) r[2]).doubleValue()});
@@ -598,7 +604,7 @@ public class InsightsService {
         Map<String, long[]> perUser = new HashMap<>(); // {count, activeDays}
         Map<String, Double> minutes = new HashMap<>();
         for (Object[] r : em.createQuery("select l.userId, " + DAY + ", count(l), sum(l.durationMinutes) from QueryLog l"
-                        + " where " + TS + " >= :f and " + TS + " < :t and l.userId is not null group by l.userId, " + DAY,
+                        + " where " + bad() + " and " + TS + " >= :f and " + TS + " < :t and l.userId is not null group by l.userId, " + DAY,
                         Object[].class)
                 .setParameter("f", f).setParameter("t", t).getResultList()) {
             long[] a = perUser.computeIfAbsent((String) r[0], k -> new long[2]);
@@ -608,7 +614,7 @@ public class InsightsService {
         }
         Map<String, Long> patterns = new HashMap<>();
         Map<String, Set<Long>> patternSets = new HashMap<>();
-        for (Object[] r : em.createQuery("select distinct l.userId, l.groupId from QueryLog l where " + TS + " >= :f and "
+        for (Object[] r : em.createQuery("select distinct l.userId, l.groupId from QueryLog l where " + bad() + " and " + TS + " >= :f and "
                         + TS + " < :t and l.userId is not null and l.groupId is not null", Object[].class)
                 .setParameter("f", f).setParameter("t", t).getResultList()) {
             patterns.merge((String) r[0], 1L, Long::sum);
@@ -668,7 +674,7 @@ public class InsightsService {
 
         Map<Long, Map<YearMonth, Long>> rows = new HashMap<>();
         for (Object[] r : em.createQuery("select l.groupId, year(" + TS + "), month(" + TS + "), count(l) from QueryLog l "
-                        + "where " + TS + " >= :f and l.groupId is not null group by l.groupId, year(" + TS + "), month("
+                        + "where " + bad() + " and " + TS + " >= :f and l.groupId is not null group by l.groupId, year(" + TS + "), month("
                         + TS + ")", Object[].class)
                 .setParameter("f", since).getResultList()) {
             YearMonth ym = YearMonth.of(((Number) r[1]).intValue(), ((Number) r[2]).intValue());
@@ -749,20 +755,79 @@ public class InsightsService {
     // helpers
     // =====================================================================================================
 
+    // =====================================================================================================
+    // Q16 one and done (adhoc-only), Q17 reappearing bad SQL after adoption
+    // =====================================================================================================
+
+    /**
+     * @param oneAndDoneByDay patterns whose bad runs all fall on that one day ("adhoc only": no sense tuning them), for
+     *                        the 14 days up to the day
+     * @param reappeared      adopted items whose bad pattern ran again after the adoption (follow-up for the CDT team)
+     */
+    public record WorkflowInsight(LocalDate date, List<CountPoint> oneAndDoneByDay, long oneAndDoneOnDay,
+                                  long badPatternsOnDay, List<Reappeared> reappeared) {
+    }
+
+    public record Reappeared(Long trackerId, Long groupId, String sqlSnippet, LocalDateTime adoptedAt, long runsSince,
+                             long usersSince, LocalDateTime lastSeen) {
+    }
+
+    public WorkflowInsight workflow(LocalDate date) {
+        LocalDate first = date.minusDays(13);
+        Map<LocalDate, Long> oneDay = new HashMap<>();
+        long patternsOnDay = 0;
+        for (Object[] r : em.createQuery("select l.groupId, min(" + DAY + "), max(" + DAY + ") from QueryLog l where "
+                        + bad() + " and l.groupId is not null group by l.groupId", Object[].class).getResultList()) {
+            LocalDate a = LocalDate.parse((String) r[1]);
+            LocalDate b = LocalDate.parse((String) r[2]);
+            if (a.equals(b) && !a.isBefore(first) && !a.isAfter(date)) {
+                oneDay.merge(a, 1L, Long::sum);
+            }
+            if (!date.isBefore(a) && !date.isAfter(b)) {
+                patternsOnDay++;
+            }
+        }
+        List<CountPoint> days = new ArrayList<>();
+        for (LocalDate d = first; !d.isAfter(date); d = d.plusDays(1)) {
+            days.add(new CountPoint(d.toString(), oneDay.getOrDefault(d, 0L)));
+        }
+        List<Reappeared> back = new ArrayList<>();
+        for (TuningTracker t : em.createQuery("select t from TuningTracker t join fetch t.group where t.workflowStatus = :st "
+                + "and t.adoptedAt is not null", TuningTracker.class).setParameter("st", WorkflowStatus.ADOPTED).getResultList()) {
+            Object[] r = em.createQuery("select count(l), count(distinct l.userId), max(" + TS + ") from QueryLog l where "
+                            + bad() + " and l.groupId = :g and " + TS + " > :at", Object[].class)
+                    .setParameter("g", t.getGroupId()).setParameter("at", t.getAdoptedAt()).getSingleResult();
+            if ((Long) r[0] > 0) {
+                back.add(new Reappeared(t.getId(), t.getGroupId(), snippet(t.getGroup().getSampleQuery()), t.getAdoptedAt(),
+                        (Long) r[0], (Long) r[1], (LocalDateTime) r[2]));
+            }
+        }
+        back.sort(Comparator.comparingLong(Reappeared::runsSince).reversed());
+        return new WorkflowInsight(date, days, oneDay.getOrDefault(date, 0L), patternsOnDay, back);
+    }
+
     /** The most recent day with any bad query (null when no logs are loaded). */
     private LocalDate latestDataDay() {
-        String day = em.createQuery("select max(" + DAY + ") from QueryLog l", String.class).getSingleResult();
+        String day = em.createQuery("select max(" + DAY + ") from QueryLog l where " + bad(), String.class).getSingleResult();
         return day == null ? null : LocalDate.parse(day.substring(0, 10));
     }
 
+    /**
+     * A bad query = a run longer than the admin threshold (Administration → Workflow settings); every insight
+     * counts bad runs only. The threshold is a number from the settings, so it is safe to inline.
+     */
+    private String bad() {
+        return "l.durationMinutes > " + settings.badMinMinutes();
+    }
+
     private long count(LocalDateTime from, LocalDateTime to) {
-        return em.createQuery("select count(l) from QueryLog l where " + TS + " >= :f and " + TS + " < :t", Long.class)
+        return em.createQuery("select count(l) from QueryLog l where " + bad() + " and " + TS + " >= :f and " + TS + " < :t", Long.class)
                 .setParameter("f", from).setParameter("t", to).getSingleResult();
     }
 
     private Map<LocalDate, Long> perDay(LocalDateTime from, LocalDateTime to) {
         Map<LocalDate, Long> out = new HashMap<>();
-        for (Object[] r : em.createQuery("select " + DAY + ", count(l) from QueryLog l where " + TS + " >= :f and " + TS
+        for (Object[] r : em.createQuery("select " + DAY + ", count(l) from QueryLog l where " + bad() + " and " + TS + " >= :f and " + TS
                         + " < :t group by " + DAY, Object[].class)
                 .setParameter("f", from).setParameter("t", to).getResultList()) {
             out.put(LocalDate.parse((String) r[0]), (Long) r[1]);

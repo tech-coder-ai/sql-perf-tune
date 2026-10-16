@@ -12,6 +12,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridApi, GridOptions, GridReadyEvent, RowClickedEvent } from 'ag-grid-community';
 import { Api } from '../../core/api';
+import { WorkflowSettingsStore } from '../../core/workflow-settings';
 import { QueryLog } from '../../core/models';
 import {
   LinkCell,
@@ -20,6 +21,7 @@ import {
   numCol,
   groupingDatasource,
   isGroupRow,
+  StatusCell,
   sqlCol,
   tsFormatter,
   errorCellRules,
@@ -42,6 +44,8 @@ interface LogFilter {
   user: string | null;
   userGroup: string | null;
   pattern: 'RECURRING' | 'NEW' | null;
+  /** also rows that are not bad queries (default: bad queries only) */
+  includeNormal: boolean;
 }
 
 const EMPTY: LogFilter = {
@@ -58,6 +62,7 @@ const EMPTY: LogFilter = {
   user: null,
   userGroup: null,
   pattern: null,
+  includeNormal: false,
 };
 
 /** A filter that came with the link (shown as a removable chip). */
@@ -89,17 +94,40 @@ export class Logs implements OnInit {
   private grid?: GridApi<QueryLog>;
 
   readonly total = signal(0);
+  protected readonly settings = inject(WorkflowSettingsStore);
   filter: LogFilter = { ...EMPTY };
   /** filters set by the link that opened the screen (from the Command center, Insights, a group, an import) */
   readonly linkFilters = signal<LinkFilter[]>([]);
 
   readonly gridOptions: GridOptions<QueryLog> = serverGridOptions<QueryLog>(50);
 
+  /** bad = longer than the admin threshold (Administration → Workflow settings) */
+  private isBad(minutes: number | null | undefined): boolean {
+    return minutes !== null && minutes !== undefined && minutes > this.settings.badMinMinutes();
+  }
+
   readonly columns: ColDef<QueryLog>[] = [
     { field: 'seqId', headerName: 'Seq ID', sortable: true, width: 100, pinned: 'left', ...numCol },
+    {
+      colId: 'class',
+      headerName: 'Class',
+      headerTooltip: 'Bad query: ran longer than the threshold set in Administration → Workflow settings',
+      width: 100,
+      pinned: 'left',
+      valueGetter: (p) => (!p.data || isGroupRow(p.data) ? null : this.isBad(p.data.durationMinutes) ? 'BAD' : 'NORMAL'),
+      cellRenderer: StatusCell,
+    },
     { field: 'startTime', headerName: 'Start time', sortable: true, width: 170, valueFormatter: tsFormatter, sort: 'desc' },
     { field: 'endTime', headerName: 'End time', sortable: true, width: 170, valueFormatter: tsFormatter },
-    { field: 'durationMinutes', headerName: 'Duration', sortable: true, width: 115, valueFormatter: minutesFormatter, ...numCol },
+    {
+      field: 'durationMinutes',
+      headerName: 'Duration',
+      sortable: true,
+      width: 115,
+      valueFormatter: minutesFormatter,
+      ...numCol,
+      cellClassRules: { 'ag-bad-duration': (p) => this.isBad(p.value) },
+    },
     {
       field: 'seenCount',
       headerName: 'Loads',
@@ -145,6 +173,7 @@ export class Logs implements OnInit {
   ];
 
   ngOnInit(): void {
+    this.settings.load();
     // links from the dashboards (and from groups / imports) carry their filters in the URL
     this.route.queryParamMap.subscribe((qp) => {
       const num = (k: string) => (qp.get(k) ? Number(qp.get(k)) : null);
@@ -160,6 +189,7 @@ export class Logs implements OnInit {
         from: qp.get('from') ?? '',
         to: qp.get('to') ?? '',
         errorsOnly: qp.get('errorsOnly') === 'true',
+        includeNormal: qp.get('includeNormal') === 'true',
       };
       this.linkFilters.set(this.describeLinkFilters());
       if (this.grid) this.search();
@@ -205,6 +235,7 @@ export class Logs implements OnInit {
       reloadedOnly: f.reloadedOnly || null,
       groupId: f.groupId,
       batchId: f.batchId,
+      includeNormal: f.includeNormal || null,
     };
   }
 

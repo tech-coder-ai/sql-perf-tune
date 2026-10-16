@@ -90,6 +90,16 @@ public record TrackerDto(
         LocalDateTime captureRequestedAt,
         LocalDateTime captureFinishedAt,
         String captureMessage,
+        String diagnosticId,
+        TuningTracker.ResultStatus resultStatus,
+        TuningTracker.AutoRunStatus autoRunStatus,
+        String autoRunMessage,
+        LocalDateTime notifiedAt,
+        String rootCause,
+        String promptImprovement,
+        String exceptionReason,
+        String exceptionBy,
+        LocalDateTime exceptionAt,
         int version,
         Map<String, String> customFields) {
 
@@ -123,7 +133,10 @@ public record TrackerDto(
                 t.getStageChangedAt(), days(t.getStageChangedAt(), t.getClosedAt() != null ? t.getClosedAt() : now),
                 days(t.getCreatedAt(), openEnd), t.getAdoptedAt(), t.getClosedAt(), t.getCreatedAt(), t.getCreatedBy(),
                 t.getUpdatedAt(), t.getUpdatedBy(), t.getCaptureStatus(), t.getCaptureRequestedAt(),
-                t.getCaptureFinishedAt(), t.getCaptureMessage(), t.getVersion(), custom == null ? Map.of() : custom);
+                t.getCaptureFinishedAt(), t.getCaptureMessage(), t.getDiagnosticId(), t.getResultStatus(),
+                t.getAutoRunStatus(), t.getAutoRunMessage(), t.getNotifiedAt(), t.getRootCause(),
+                t.getPromptImprovement(), t.getExceptionReason(), t.getExceptionBy(), t.getExceptionAt(),
+                t.getVersion(), custom == null ? Map.of() : custom);
     }
 
     /** Run-time reduction in percent (positive = faster). */

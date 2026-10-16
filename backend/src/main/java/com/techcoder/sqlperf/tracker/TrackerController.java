@@ -19,6 +19,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.transaction.annotation.Transactional;
 import com.techcoder.sqlperf.common.RowGrouping;
 import com.techcoder.sqlperf.log.ActiveWindow;
+import com.techcoder.sqlperf.settings.WorkflowSettings;
 import org.springframework.format.annotation.DateTimeFormat;
 import jakarta.persistence.EntityManager;
 import java.util.Map;
@@ -52,9 +53,12 @@ public class TrackerController {
     private final TrackerExcelExporter exporter;
     private final AuditService audit;
     private final EntityManager em;
+    private final WorkflowSettings settings;
 
-    public TrackerController(TrackerService service, TrackerExcelExporter exporter, AuditService audit, EntityManager em) {
+    public TrackerController(TrackerService service, TrackerExcelExporter exporter, AuditService audit, EntityManager em,
+                             WorkflowSettings settings) {
         this.em = em;
+        this.settings = settings;
         this.service = service;
         this.exporter = exporter;
         this.audit = audit;
@@ -66,6 +70,8 @@ public class TrackerController {
             Map.entry("priority", RowGrouping.Column.enumOf("priority", TuningTracker.Priority.class)),
             Map.entry("requestSource", RowGrouping.Column.enumOf("requestSource", TuningTracker.RequestSource.class)),
             Map.entry("captureStatus", RowGrouping.Column.enumOf("captureStatus", TuningTracker.CaptureStatus.class)),
+            Map.entry("resultStatus", RowGrouping.Column.enumOf("resultStatus", TuningTracker.ResultStatus.class)),
+            Map.entry("autoRunStatus", RowGrouping.Column.enumOf("autoRunStatus", TuningTracker.AutoRunStatus.class)),
             Map.entry("sqlEngine", RowGrouping.Column.text("group.sqlEngine")),
             Map.entry("theme", RowGrouping.Column.text("theme")),
             Map.entry("environment", RowGrouping.Column.text("environment")),
@@ -173,6 +179,29 @@ public class TrackerController {
         return service.update(id, req);
     }
 
+    public record ExceptionRequest(String reason) {
+    }
+
+    /** Step 13 "RCA exception": nothing more can be done; the SQL is not tuned any further. */
+    @PostMapping("/{id}/exception")
+    public TrackerDto exception(@PathVariable Long id, @RequestBody ExceptionRequest req) {
+        return service.markException(id, req.reason());
+    }
+
+    public record AwaitingFixRequest(String theme, String rootCause) {
+    }
+
+    /** Step 14: waits for the architectural fix of a theme. */
+    @PostMapping("/{id}/awaiting-fix")
+    public TrackerDto awaitingFix(@PathVariable Long id, @RequestBody AwaitingFixRequest req) {
+        return service.markAwaitingFix(id, req.theme(), req.rootCause());
+    }
+
+    @PostMapping("/{id}/reopen")
+    public TrackerDto reopen(@PathVariable Long id) {
+        return service.reopen(id);
+    }
+
     @GetMapping("/{id}/history")
     public List<AuditEvent> history(@PathVariable Long id) {
         return audit.history(TrackerService.AUDIT_TYPE, id);
@@ -204,9 +233,10 @@ public class TrackerController {
     }
 
     /** Items whose pattern had bad queries between the two days (the dashboards' "active" window). */
-    private static Specification<TuningTracker> active(LocalDate from, LocalDate to) {
+    private Specification<TuningTracker> active(LocalDate from, LocalDate to) {
+        double bad = settings.badMinMinutes();
         return from == null && to == null ? null
-                : (root, cq, cb) -> ActiveWindow.of(root.get("groupId"), from, to, cq, cb);
+                : (root, cq, cb) -> ActiveWindow.of(root.get("groupId"), from, to, bad, cq, cb);
     }
 
     private static Specification<TuningTracker> spec(String q, List<TuningTracker.WorkflowStatus> status,
